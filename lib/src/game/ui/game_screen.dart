@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../engine/local_game_controller.dart';
@@ -130,17 +132,70 @@ class _GameScreenState extends State<GameScreen> {
                   const SizedBox(height: 12),
                   Expanded(
                     child: Center(
-                      child: AspectRatio(
-                        aspectRatio: 1,
-                        child: ChessBoardView(
-                          pieces: _controller.boardPieces,
-                          playerColor: _controller.playerColor,
-                          selectedSquare: _controller.selectedSquare,
-                          legalTargets: _controller.legalTargets,
-                          lastMoveFrom: _controller.lastMoveFrom,
-                          lastMoveTo: _controller.lastMoveTo,
-                          onSquareTap: _controller.tapSquare,
-                        ),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          const sideBarWidth = 30.0;
+                          const sideGap = 10.0;
+                          final maxBoardWidth =
+                              constraints.maxWidth -
+                              (sideBarWidth * 2) -
+                              (sideGap * 2);
+                          final boardSize = math.min(
+                            maxBoardWidth,
+                            constraints.maxHeight,
+                          );
+                          if (boardSize <= 0) {
+                            return const SizedBox.shrink();
+                          }
+
+                          final whiteRatio = _cooldownRatio(_controller, 'w');
+                          final blackRatio = _cooldownRatio(_controller, 'b');
+
+                          return SizedBox(
+                            width:
+                                boardSize + (sideBarWidth * 2) + (sideGap * 2),
+                            height: boardSize,
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: sideBarWidth,
+                                  child: _SideCooldownBar(
+                                    label: 'W',
+                                    ratio: whiteRatio,
+                                    activeColor: const Color(0xFF42A5F5),
+                                    isPlayerSide:
+                                        _controller.playerColor == 'w',
+                                  ),
+                                ),
+                                const SizedBox(width: sideGap),
+                                SizedBox(
+                                  width: boardSize,
+                                  height: boardSize,
+                                  child: ChessBoardView(
+                                    pieces: _controller.boardPieces,
+                                    playerColor: _controller.playerColor,
+                                    selectedSquare: _controller.selectedSquare,
+                                    legalTargets: _controller.legalTargets,
+                                    lastMoveFrom: _controller.lastMoveFrom,
+                                    lastMoveTo: _controller.lastMoveTo,
+                                    onSquareTap: _controller.tapSquare,
+                                  ),
+                                ),
+                                const SizedBox(width: sideGap),
+                                SizedBox(
+                                  width: sideBarWidth,
+                                  child: _SideCooldownBar(
+                                    label: 'B',
+                                    ratio: blackRatio,
+                                    activeColor: const Color(0xFFFF7043),
+                                    isPlayerSide:
+                                        _controller.playerColor == 'b',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
                       ),
                     ),
                   ),
@@ -187,6 +242,17 @@ class _GameScreenState extends State<GameScreen> {
     final seconds = duration.inMilliseconds / 1000.0;
     return '${seconds.toStringAsFixed(1)}s';
   }
+
+  static double _cooldownRatio(LocalGameController controller, String color) {
+    final totalMs = controller.cooldownDuration.inMilliseconds;
+    if (totalMs <= 0) {
+      return 0;
+    }
+
+    final remainingMs = controller.cooldownRemaining(color).inMilliseconds;
+    final ratio = remainingMs / totalMs;
+    return ratio.clamp(0.0, 1.0);
+  }
 }
 
 class _InfoChip extends StatelessWidget {
@@ -208,6 +274,98 @@ class _InfoChip extends StatelessWidget {
           '$label: $value',
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
+      ),
+    );
+  }
+}
+
+class _SideCooldownBar extends StatelessWidget {
+  const _SideCooldownBar({
+    required this.label,
+    required this.ratio,
+    required this.activeColor,
+    required this.isPlayerSide,
+  });
+
+  final String label;
+  final double ratio;
+  final Color activeColor;
+  final bool isPlayerSide;
+
+  @override
+  Widget build(BuildContext context) {
+    final ready = ratio == 0;
+    final fillColor = ready ? const Color(0xFF43A047) : activeColor;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFDED6CB),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: Padding(
+              padding: const EdgeInsets.all(3),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: DecoratedBox(
+                  decoration: const BoxDecoration(color: Color(0xFF9E9489)),
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween<double>(begin: 0, end: ratio),
+                      duration: const Duration(milliseconds: 160),
+                      builder: (context, value, _) {
+                        return FractionallySizedBox(
+                          heightFactor: value,
+                          widthFactor: 1,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.bottomCenter,
+                                end: Alignment.topCenter,
+                                colors: [
+                                  fillColor.withValues(alpha: 0.95),
+                                  fillColor.withValues(alpha: 0.55),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 6,
+            left: 0,
+            right: 0,
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 11,
+                color: Color(0xFF1A1A1A),
+              ),
+            ),
+          ),
+          if (isPlayerSide)
+            Positioned(
+              bottom: 6,
+              left: 0,
+              right: 0,
+              child: const Icon(
+                Icons.person,
+                size: 12,
+                color: Color(0xFF1A1A1A),
+              ),
+            ),
+        ],
       ),
     );
   }
