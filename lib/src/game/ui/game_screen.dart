@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../engine/local_game_controller.dart';
 import 'chess_board_view.dart';
+import 'online_game_panel.dart';
+
+enum _GameMode { local, online }
 
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key});
@@ -18,6 +21,7 @@ class _GameScreenState extends State<GameScreen> {
   late final LocalGameController _controller;
   bool _isGameMenuOpen = false;
   int _selectedCooldownSeconds = 3;
+  _GameMode _mode = _GameMode.local;
 
   @override
   void initState() {
@@ -38,322 +42,314 @@ class _GameScreenState extends State<GameScreen> {
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
-        final history = _controller.history;
-        final tailHistory = history.length > 8
-            ? history.sublist(history.length - 8)
-            : history;
-
         return Scaffold(
           appBar: AppBar(title: const Text('Bullethole Chess MVP')),
           body: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  Card(
-                    elevation: 0,
-                    color: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: SegmentedButton<_GameMode>(
+                      segments: const [
+                        ButtonSegment<_GameMode>(
+                          value: _GameMode.local,
+                          label: Text('Local vs Bot'),
+                          icon: Icon(Icons.smart_toy_outlined),
+                        ),
+                        ButtonSegment<_GameMode>(
+                          value: _GameMode.online,
+                          label: Text('Online Prototype'),
+                          icon: Icon(Icons.wifi),
+                        ),
+                      ],
+                      selected: <_GameMode>{_mode},
+                      onSelectionChanged: (selection) {
+                        setState(() {
+                          _mode = selection.first;
+                        });
+                      },
                     ),
+                  ),
+                ),
+                Expanded(
+                  child: IndexedStack(
+                    index: _mode == _GameMode.local ? 0 : 1,
+                    children: [_buildLocalView(), const OnlineGamePanel()],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildLocalView() {
+    final history = _controller.history;
+    final tailHistory = history.length > 8
+        ? history.sublist(history.length - 8)
+        : history;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      child: Column(
+        children: [
+          Card(
+            elevation: 0,
+            color: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            child: Column(
+              children: [
+                ListTile(
+                  dense: true,
+                  title: const Text(
+                    'Game Menu',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  subtitle: const Text('New game and settings'),
+                  trailing: Icon(
+                    _isGameMenuOpen
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                  ),
+                  onTap: () {
+                    setState(() {
+                      _isGameMenuOpen = !_isGameMenuOpen;
+                    });
+                  },
+                ),
+                AnimatedCrossFade(
+                  firstChild: const SizedBox.shrink(),
+                  secondChild: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                     child: Column(
                       children: [
-                        ListTile(
-                          dense: true,
-                          title: const Text(
-                            'Game Menu',
-                            style: TextStyle(fontWeight: FontWeight.w700),
+                        DropdownButtonFormField<int>(
+                          initialValue: _selectedCooldownSeconds,
+                          decoration: const InputDecoration(
+                            labelText: 'Cooldown (seconds)',
+                            border: OutlineInputBorder(),
+                            isDense: true,
                           ),
-                          subtitle: const Text('New game and settings'),
-                          trailing: Icon(
-                            _isGameMenuOpen
-                                ? Icons.keyboard_arrow_up
-                                : Icons.keyboard_arrow_down,
-                          ),
-                          onTap: () {
+                          items: _cooldownOptionsSeconds
+                              .map(
+                                (seconds) => DropdownMenuItem<int>(
+                                  value: seconds,
+                                  child: Text('$seconds s'),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (value) {
+                            if (value == null) {
+                              return;
+                            }
                             setState(() {
-                              _isGameMenuOpen = !_isGameMenuOpen;
+                              _selectedCooldownSeconds = value;
                             });
                           },
                         ),
-                        AnimatedCrossFade(
-                          firstChild: const SizedBox.shrink(),
-                          secondChild: Padding(
-                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                            child: Column(
-                              children: [
-                                DropdownButtonFormField<int>(
-                                  initialValue: _selectedCooldownSeconds,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Cooldown (seconds)',
-                                    border: OutlineInputBorder(),
-                                    isDense: true,
-                                  ),
-                                  items: _cooldownOptionsSeconds
-                                      .map(
-                                        (seconds) => DropdownMenuItem<int>(
-                                          value: seconds,
-                                          child: Text('$seconds s'),
-                                        ),
-                                      )
-                                      .toList(),
-                                  onChanged: (value) {
-                                    if (value == null) {
-                                      return;
-                                    }
-                                    setState(() {
-                                      _selectedCooldownSeconds = value;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(height: 10),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: FilledButton.tonal(
-                                        onPressed: () {
-                                          _startNewGame(playerAsWhite: true);
-                                        },
-                                        child: const Text('New Game: White'),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: FilledButton.tonal(
-                                        onPressed: () {
-                                          _startNewGame(playerAsWhite: false);
-                                        },
-                                        child: const Text('New Game: Black'),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: OutlinedButton.icon(
-                                    onPressed: _controller.hasQueuedMove
-                                        ? _controller.clearQueuedMove
-                                        : null,
-                                    icon: const Icon(Icons.clear_all, size: 18),
-                                    label: Text(
-                                      _controller.hasQueuedMove
-                                          ? 'Clear Queue (${_controller.queuedMoveLabel})'
-                                          : 'Clear Queue',
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                const Row(
-                                  children: [
-                                    Icon(
-                                      Icons.tune,
-                                      size: 16,
-                                      color: Color(0xFF6A625A),
-                                    ),
-                                    SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        'Settings section placeholder (coming soon)',
-                                        style: TextStyle(
-                                          color: Color(0xFF6A625A),
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: FilledButton.tonal(
+                                onPressed: () {
+                                  _startNewGame(playerAsWhite: true);
+                                },
+                                child: const Text('New Game: White'),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: FilledButton.tonal(
+                                onPressed: () {
+                                  _startNewGame(playerAsWhite: false);
+                                },
+                                child: const Text('New Game: Black'),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: OutlinedButton.icon(
+                            onPressed: _controller.hasQueuedMove
+                                ? _controller.clearQueuedMove
+                                : null,
+                            icon: const Icon(Icons.clear_all, size: 18),
+                            label: Text(
+                              _controller.hasQueuedMove
+                                  ? 'Clear Queue (${_controller.queuedMoveLabel})'
+                                  : 'Clear Queue',
                             ),
                           ),
-                          crossFadeState: _isGameMenuOpen
-                              ? CrossFadeState.showSecond
-                              : CrossFadeState.showFirst,
-                          duration: const Duration(milliseconds: 180),
-                          sizeCurve: Curves.easeOutCubic,
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  Card(
-                    elevation: 0,
-                    color: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _controller.statusText,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          if (_controller.feedback != null) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              _controller.feedback!,
-                              style: const TextStyle(
-                                color: Color(0xFFB71C1C),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              _InfoChip(
-                                label: 'Ready',
-                                value: _controller.readyLabel,
-                              ),
-                              _InfoChip(
-                                label: 'Version',
-                                value: _controller.version.toString(),
-                              ),
-                              _InfoChip(
-                                label: 'N',
-                                value:
-                                    '${_controller.cooldownDuration.inSeconds}s',
-                              ),
-                              _InfoChip(
-                                label: 'Queue',
-                                value: _controller.queuedMoveLabel ?? '-',
-                              ),
-                              _InfoChip(
-                                label: 'You',
-                                value: _formatDuration(
-                                  _controller.cooldownRemaining(
-                                    _controller.playerColor,
-                                  ),
-                                ),
-                              ),
-                              _InfoChip(
-                                label: 'Bot',
-                                value: _formatDuration(
-                                  _controller.cooldownRemaining(
-                                    _controller.aiColor,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+                  crossFadeState: _isGameMenuOpen
+                      ? CrossFadeState.showSecond
+                      : CrossFadeState.showFirst,
+                  duration: const Duration(milliseconds: 180),
+                  sizeCurve: Curves.easeOutCubic,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            elevation: 0,
+            color: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _controller.statusText,
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                  if (_controller.feedback != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      _controller.feedback!,
+                      style: const TextStyle(
+                        color: Color(0xFFB71C1C),
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
+                  ],
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _InfoChip(label: 'Ready', value: _controller.readyLabel),
+                      _InfoChip(
+                        label: 'Version',
+                        value: _controller.version.toString(),
+                      ),
+                      _InfoChip(
+                        label: 'N',
+                        value: '${_controller.cooldownDuration.inSeconds}s',
+                      ),
+                      _InfoChip(
+                        label: 'Queue',
+                        value: _controller.queuedMoveLabel ?? '-',
+                      ),
+                      _InfoChip(
+                        label: 'You',
+                        value: _formatDuration(
+                          _controller.cooldownRemaining(_controller.playerColor),
+                        ),
+                      ),
+                      _InfoChip(
+                        label: 'Bot',
+                        value: _formatDuration(
+                          _controller.cooldownRemaining(_controller.aiColor),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 12),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Expanded(
+            child: Center(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  const sideBarWidth = 30.0;
+                  const sideGap = 10.0;
+                  final maxBoardWidth =
+                      constraints.maxWidth - (sideBarWidth * 2) - (sideGap * 2);
+                  final boardSize = math.min(maxBoardWidth, constraints.maxHeight);
+                  if (boardSize <= 0) {
+                    return const SizedBox.shrink();
+                  }
+
+                  final whiteRatio = _cooldownRatio(_controller, 'w');
+                  final blackRatio = _cooldownRatio(_controller, 'b');
+
+                  return SizedBox(
+                    width: boardSize + (sideBarWidth * 2) + (sideGap * 2),
+                    height: boardSize,
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: sideBarWidth,
+                          child: _SideCooldownBar(
+                            label: 'W',
+                            ratio: whiteRatio,
+                            activeColor: const Color(0xFF42A5F5),
+                            isPlayerSide: _controller.playerColor == 'w',
+                          ),
+                        ),
+                        const SizedBox(width: sideGap),
+                        SizedBox(
+                          width: boardSize,
+                          height: boardSize,
+                          child: ChessBoardView(
+                            pieces: _controller.boardPieces,
+                            playerColor: _controller.playerColor,
+                            selectedSquare: _controller.selectedSquare,
+                            legalTargets: _controller.legalTargets,
+                            lastMoveFrom: _controller.lastMoveFrom,
+                            lastMoveTo: _controller.lastMoveTo,
+                            onSquareTap: _controller.tapSquare,
+                          ),
+                        ),
+                        const SizedBox(width: sideGap),
+                        SizedBox(
+                          width: sideBarWidth,
+                          child: _SideCooldownBar(
+                            label: 'B',
+                            ratio: blackRatio,
+                            activeColor: const Color(0xFFFF7043),
+                            isPlayerSide: _controller.playerColor == 'b',
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            elevation: 0,
+            color: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Moves:',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(width: 8),
                   Expanded(
-                    child: Center(
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          const sideBarWidth = 30.0;
-                          const sideGap = 10.0;
-                          final maxBoardWidth =
-                              constraints.maxWidth -
-                              (sideBarWidth * 2) -
-                              (sideGap * 2);
-                          final boardSize = math.min(
-                            maxBoardWidth,
-                            constraints.maxHeight,
-                          );
-                          if (boardSize <= 0) {
-                            return const SizedBox.shrink();
-                          }
-
-                          final whiteRatio = _cooldownRatio(_controller, 'w');
-                          final blackRatio = _cooldownRatio(_controller, 'b');
-
-                          return SizedBox(
-                            width:
-                                boardSize + (sideBarWidth * 2) + (sideGap * 2),
-                            height: boardSize,
-                            child: Row(
-                              children: [
-                                SizedBox(
-                                  width: sideBarWidth,
-                                  child: _SideCooldownBar(
-                                    label: 'W',
-                                    ratio: whiteRatio,
-                                    activeColor: const Color(0xFF42A5F5),
-                                    isPlayerSide:
-                                        _controller.playerColor == 'w',
-                                  ),
-                                ),
-                                const SizedBox(width: sideGap),
-                                SizedBox(
-                                  width: boardSize,
-                                  height: boardSize,
-                                  child: ChessBoardView(
-                                    pieces: _controller.boardPieces,
-                                    playerColor: _controller.playerColor,
-                                    selectedSquare: _controller.selectedSquare,
-                                    legalTargets: _controller.legalTargets,
-                                    lastMoveFrom: _controller.lastMoveFrom,
-                                    lastMoveTo: _controller.lastMoveTo,
-                                    onSquareTap: _controller.tapSquare,
-                                  ),
-                                ),
-                                const SizedBox(width: sideGap),
-                                SizedBox(
-                                  width: sideBarWidth,
-                                  child: _SideCooldownBar(
-                                    label: 'B',
-                                    ratio: blackRatio,
-                                    activeColor: const Color(0xFFFF7043),
-                                    isPlayerSide:
-                                        _controller.playerColor == 'b',
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Card(
-                    elevation: 0,
-                    color: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Moves:',
-                            style: TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              tailHistory.isEmpty
-                                  ? '-'
-                                  : tailHistory.join('  '),
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
+                    child: Text(
+                      tailHistory.isEmpty ? '-' : tailHistory.join('  '),
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
               ),
             ),
           ),
-        );
-      },
+        ],
+      ),
     );
   }
 
@@ -488,11 +484,7 @@ class _SideCooldownBar extends StatelessWidget {
               bottom: 6,
               left: 0,
               right: 0,
-              child: const Icon(
-                Icons.person,
-                size: 12,
-                color: Color(0xFF1A1A1A),
-              ),
+              child: const Icon(Icons.person, size: 12, color: Color(0xFF1A1A1A)),
             ),
         ],
       ),

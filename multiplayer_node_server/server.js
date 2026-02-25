@@ -2,7 +2,10 @@ const crypto = require('crypto');
 const http = require('http');
 
 const express = require('express');
+<<<<<<< HEAD
 const cors = require('cors');
+=======
+>>>>>>> refs/remotes/origin/main
 const { Chess } = require('chess.js');
 const { WebSocketServer } = require('ws');
 
@@ -11,9 +14,13 @@ const BIND = process.env.BIND || '0.0.0.0';
 const MATCH_TTL_MS = Number.parseInt(process.env.MATCH_TTL_MS || `${6 * 60 * 60 * 1000}`, 10);
 
 const app = express();
+<<<<<<< HEAD
 app.use(cors());
 app.use(express.json({ limit: '32kb' }));
 app.options('*', cors());
+=======
+app.use(express.json({ limit: '32kb' }));
+>>>>>>> refs/remotes/origin/main
 
 const matches = new Map();
 const matchByJoinCode = new Map();
