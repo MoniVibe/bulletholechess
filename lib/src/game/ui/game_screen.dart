@@ -13,12 +13,18 @@ class GameScreen extends StatefulWidget {
 }
 
 class _GameScreenState extends State<GameScreen> {
+  static const List<int> _cooldownOptionsSeconds = [2, 3, 5, 7, 10];
+
   late final LocalGameController _controller;
+  bool _isGameMenuOpen = false;
+  int _selectedCooldownSeconds = 3;
 
   @override
   void initState() {
     super.initState();
-    _controller = LocalGameController();
+    _controller = LocalGameController(
+      initialCooldownDuration: Duration(seconds: _selectedCooldownSeconds),
+    );
   }
 
   @override
@@ -44,26 +50,130 @@ class _GameScreenState extends State<GameScreen> {
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: FilledButton.tonal(
-                          onPressed: () {
-                            _controller.startNewGame(playerAsWhite: true);
+                  Card(
+                    elevation: 0,
+                    color: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Column(
+                      children: [
+                        ListTile(
+                          dense: true,
+                          title: const Text(
+                            'Game Menu',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          subtitle: const Text('New game and settings'),
+                          trailing: Icon(
+                            _isGameMenuOpen
+                                ? Icons.keyboard_arrow_up
+                                : Icons.keyboard_arrow_down,
+                          ),
+                          onTap: () {
+                            setState(() {
+                              _isGameMenuOpen = !_isGameMenuOpen;
+                            });
                           },
-                          child: const Text('New Game: White'),
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: FilledButton.tonal(
-                          onPressed: () {
-                            _controller.startNewGame(playerAsWhite: false);
-                          },
-                          child: const Text('New Game: Black'),
+                        AnimatedCrossFade(
+                          firstChild: const SizedBox.shrink(),
+                          secondChild: Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                            child: Column(
+                              children: [
+                                DropdownButtonFormField<int>(
+                                  initialValue: _selectedCooldownSeconds,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Cooldown (seconds)',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  items: _cooldownOptionsSeconds
+                                      .map(
+                                        (seconds) => DropdownMenuItem<int>(
+                                          value: seconds,
+                                          child: Text('$seconds s'),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (value) {
+                                    if (value == null) {
+                                      return;
+                                    }
+                                    setState(() {
+                                      _selectedCooldownSeconds = value;
+                                    });
+                                  },
+                                ),
+                                const SizedBox(height: 10),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: FilledButton.tonal(
+                                        onPressed: () {
+                                          _startNewGame(playerAsWhite: true);
+                                        },
+                                        child: const Text('New Game: White'),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: FilledButton.tonal(
+                                        onPressed: () {
+                                          _startNewGame(playerAsWhite: false);
+                                        },
+                                        child: const Text('New Game: Black'),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: OutlinedButton.icon(
+                                    onPressed: _controller.hasQueuedMove
+                                        ? _controller.clearQueuedMove
+                                        : null,
+                                    icon: const Icon(Icons.clear_all, size: 18),
+                                    label: Text(
+                                      _controller.hasQueuedMove
+                                          ? 'Clear Queue (${_controller.queuedMoveLabel})'
+                                          : 'Clear Queue',
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                const Row(
+                                  children: [
+                                    Icon(
+                                      Icons.tune,
+                                      size: 16,
+                                      color: Color(0xFF6A625A),
+                                    ),
+                                    SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Settings section placeholder (coming soon)',
+                                        style: TextStyle(
+                                          color: Color(0xFF6A625A),
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          crossFadeState: _isGameMenuOpen
+                              ? CrossFadeState.showSecond
+                              : CrossFadeState.showFirst,
+                          duration: const Duration(milliseconds: 180),
+                          sizeCurve: Curves.easeOutCubic,
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Card(
@@ -106,6 +216,15 @@ class _GameScreenState extends State<GameScreen> {
                               _InfoChip(
                                 label: 'Version',
                                 value: _controller.version.toString(),
+                              ),
+                              _InfoChip(
+                                label: 'N',
+                                value:
+                                    '${_controller.cooldownDuration.inSeconds}s',
+                              ),
+                              _InfoChip(
+                                label: 'Queue',
+                                value: _controller.queuedMoveLabel ?? '-',
                               ),
                               _InfoChip(
                                 label: 'You',
@@ -252,6 +371,16 @@ class _GameScreenState extends State<GameScreen> {
     final remainingMs = controller.cooldownRemaining(color).inMilliseconds;
     final ratio = remainingMs / totalMs;
     return ratio.clamp(0.0, 1.0);
+  }
+
+  void _startNewGame({required bool playerAsWhite}) {
+    _controller.startNewGame(
+      playerAsWhite: playerAsWhite,
+      cooldownDuration: Duration(seconds: _selectedCooldownSeconds),
+    );
+    setState(() {
+      _isGameMenuOpen = false;
+    });
   }
 }
 

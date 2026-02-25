@@ -8,13 +8,14 @@ import 'dumb_ai_engine.dart';
 
 class LocalGameController extends ChangeNotifier {
   LocalGameController({
-    this.cooldownDuration = const Duration(seconds: 3),
+    Duration initialCooldownDuration = const Duration(seconds: 3),
     this.aiThinkDelayMin = const Duration(seconds: 2),
     this.aiThinkDelayMax = const Duration(seconds: 4),
     DumbAiEngine? aiEngine,
     Random? random,
   }) : _random = random ?? Random(),
-       _aiEngine = aiEngine ?? DumbAiEngine(random: random ?? Random()) {
+       _aiEngine = aiEngine ?? DumbAiEngine(random: random ?? Random()),
+       _cooldownDuration = initialCooldownDuration {
     _resetRuntimeState();
     _ticker = Timer.periodic(
       const Duration(milliseconds: 200),
@@ -23,7 +24,7 @@ class LocalGameController extends ChangeNotifier {
     _maybeScheduleAiMove();
   }
 
-  final Duration cooldownDuration;
+  Duration _cooldownDuration;
   final Duration aiThinkDelayMin;
   final Duration aiThinkDelayMax;
   final Random _random;
@@ -44,8 +45,12 @@ class LocalGameController extends ChangeNotifier {
   String? _lastMoveFrom;
   String? _lastMoveTo;
   String? _feedback;
+  String? _queuedMoveFrom;
+  String? _queuedMoveTo;
+  String _queuedPromotion = 'q';
 
   int get version => _version;
+  Duration get cooldownDuration => _cooldownDuration;
   String get playerColor => _playerColor;
   String get aiColor => _otherColor(playerColor);
   String get readyLabel {
@@ -67,10 +72,15 @@ class LocalGameController extends ChangeNotifier {
   String get turnLabel => turnColor == 'w' ? 'White' : 'Black';
   bool get isGameOver => _game.game_over;
   bool get aiMovePending => _aiMovePending;
-  bool get canPlayerInteract =>
-      !isGameOver &&
-      cooldownRemaining(playerColor).inMilliseconds == 0 &&
-      _hasAnyLegalMove(playerColor);
+  bool get canPlayerInteract => !isGameOver && _hasAnyLegalMove(playerColor);
+  bool get hasQueuedMove => _queuedMoveFrom != null && _queuedMoveTo != null;
+  String? get queuedMoveLabel {
+    if (!hasQueuedMove) {
+      return null;
+    }
+    return '$_queuedMoveFrom-$_queuedMoveTo';
+  }
+
   String? get selectedSquare => _selectedSquare;
   Set<String> get legalTargets => _legalTargets;
   String? get lastMoveFrom => _lastMoveFrom;
@@ -86,6 +96,14 @@ class LocalGameController extends ChangeNotifier {
     }
     if (_game.in_draw) {
       return 'Draw game.';
+    }
+
+    if (hasQueuedMove) {
+      final remaining = cooldownRemaining(playerColor);
+      if (remaining.inMilliseconds > 0) {
+        return 'Queued $queuedMoveLabel (${_formatDuration(remaining)}).';
+      }
+      return 'Queued $queuedMoveLabel. Executing...';
     }
 
     final playerReady = cooldownRemaining(playerColor).inMilliseconds == 0;
@@ -123,11 +141,23 @@ class LocalGameController extends ChangeNotifier {
     return remaining;
   }
 
-  void startNewGame({bool playerAsWhite = true}) {
+  void startNewGame({bool playerAsWhite = true, Duration? cooldownDuration}) {
     _cancelAiTimer();
     _playerColor = playerAsWhite ? 'w' : 'b';
+    if (cooldownDuration != null) {
+      _cooldownDuration = cooldownDuration;
+    }
     _resetRuntimeState();
     _maybeScheduleAiMove();
+    notifyListeners();
+  }
+
+  void clearQueuedMove() {
+    if (!hasQueuedMove) {
+      return;
+    }
+    _clearQueuedMove();
+    _feedback = 'Queued move cleared';
     notifyListeners();
   }
 
@@ -156,17 +186,37 @@ class LocalGameController extends ChangeNotifier {
       return;
     }
 
-    final didMove = _applyMove(
-      from: _selectedSquare!,
+    final from = _selectedSquare!;
+    final legalNow = _isMoveLegalNow(
+      from: from,
       to: square,
-      moverColor: playerColor,
+      color: playerColor,
+      promotion: 'q',
     );
-    if (didMove) {
-      _clearSelection();
-      _feedback = null;
-      _maybeScheduleAiMove();
-      notifyListeners();
-      return;
+
+    if (legalNow) {
+      final onCooldown = cooldownRemaining(playerColor).inMilliseconds > 0;
+      if (onCooldown) {
+        _queuePlayerMove(from: from, to: square, promotion: 'q');
+        _clearSelection();
+        _feedback = 'Queued $from-$square';
+        notifyListeners();
+        return;
+      }
+
+      final didMove = _applyMove(
+        from: from,
+        to: square,
+        moverColor: playerColor,
+      );
+      if (didMove) {
+        _clearQueuedMove();
+        _clearSelection();
+        _feedback = null;
+        _maybeScheduleAiMove();
+        notifyListeners();
+        return;
+      }
     }
 
     if (isOwnPiece) {
@@ -193,6 +243,7 @@ class LocalGameController extends ChangeNotifier {
     if (_disposed) {
       return;
     }
+    _tryExecuteQueuedPlayerMove();
     _maybeScheduleAiMove();
     notifyListeners();
   }
@@ -232,6 +283,7 @@ class LocalGameController extends ChangeNotifier {
       );
     }
 
+    _refreshSelectionForCurrentBoard();
     _aiMovePending = false;
     _feedback = null;
     notifyListeners();
@@ -246,6 +298,9 @@ class LocalGameController extends ChangeNotifier {
     _lastMoveTo = null;
     _feedback = null;
     _aiMovePending = false;
+    _queuedMoveFrom = null;
+    _queuedMoveTo = null;
+    _queuedPromotion = 'q';
 
     final now = DateTime.now();
     _whiteReadyAt = now;
@@ -280,18 +335,19 @@ class LocalGameController extends ChangeNotifier {
     _lastMoveFrom = from;
     _lastMoveTo = to;
     _setCooldownForMover(moverColor);
+    _refreshSelectionForCurrentBoard();
     return true;
   }
 
   void _setCooldownForMover(String mover) {
     final now = DateTime.now();
     if (mover == 'w') {
-      _whiteReadyAt = now.add(cooldownDuration);
+      _whiteReadyAt = now.add(_cooldownDuration);
       _blackReadyAt = now;
       return;
     }
 
-    _blackReadyAt = now.add(cooldownDuration);
+    _blackReadyAt = now.add(_cooldownDuration);
     _whiteReadyAt = now;
   }
 
@@ -318,9 +374,102 @@ class LocalGameController extends ChangeNotifier {
     return _withTurn(color, () => _game.in_check);
   }
 
+  bool _isMoveLegalNow({
+    required String from,
+    required String to,
+    required String color,
+    required String promotion,
+  }) {
+    return _withTurn(color, () {
+      final legalMoves = _game
+          .moves({'verbose': true})
+          .map((dynamic item) => Map<String, dynamic>.from(item as Map));
+      return legalMoves.any((move) {
+        if (move['from'] != from || move['to'] != to) {
+          return false;
+        }
+        final movePromotion = move['promotion'] as String?;
+        if (movePromotion == null) {
+          return true;
+        }
+        return movePromotion == promotion;
+      });
+    });
+  }
+
   void _clearSelection() {
     _selectedSquare = null;
     _legalTargets = <String>{};
+  }
+
+  void _queuePlayerMove({
+    required String from,
+    required String to,
+    required String promotion,
+  }) {
+    _queuedMoveFrom = from;
+    _queuedMoveTo = to;
+    _queuedPromotion = promotion;
+  }
+
+  void _clearQueuedMove() {
+    _queuedMoveFrom = null;
+    _queuedMoveTo = null;
+    _queuedPromotion = 'q';
+  }
+
+  void _tryExecuteQueuedPlayerMove() {
+    if (!hasQueuedMove || isGameOver) {
+      return;
+    }
+    if (cooldownRemaining(playerColor).inMilliseconds > 0) {
+      return;
+    }
+
+    final from = _queuedMoveFrom!;
+    final to = _queuedMoveTo!;
+    final promotion = _queuedPromotion;
+    final legalNow = _isMoveLegalNow(
+      from: from,
+      to: to,
+      color: playerColor,
+      promotion: promotion,
+    );
+    if (!legalNow) {
+      _clearQueuedMove();
+      _feedback = 'Queued move expired';
+      return;
+    }
+
+    final moved = _applyMove(
+      from: from,
+      to: to,
+      promotion: promotion,
+      moverColor: playerColor,
+    );
+    if (!moved) {
+      _clearQueuedMove();
+      _feedback = 'Queued move failed';
+      return;
+    }
+
+    _clearQueuedMove();
+    _feedback = null;
+    _maybeScheduleAiMove();
+  }
+
+  void _refreshSelectionForCurrentBoard() {
+    if (_selectedSquare == null) {
+      return;
+    }
+
+    final piece = boardPieces[_selectedSquare!];
+    if (piece == null || _pieceColor(piece) != playerColor) {
+      _clearSelection();
+      return;
+    }
+
+    _legalTargets = _legalDestinationsFrom(_selectedSquare!, playerColor);
   }
 
   void _cancelAiTimer() {
@@ -342,6 +491,11 @@ class LocalGameController extends ChangeNotifier {
 
   static String _pieceColor(String piece) {
     return piece == piece.toUpperCase() ? 'w' : 'b';
+  }
+
+  static String _formatDuration(Duration duration) {
+    final seconds = duration.inMilliseconds / 1000.0;
+    return '${seconds.toStringAsFixed(1)}s';
   }
 
   T _withTurn<T>(String color, T Function() callback) {
