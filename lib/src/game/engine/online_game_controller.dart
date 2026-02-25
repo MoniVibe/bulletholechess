@@ -29,6 +29,7 @@ class OnlineGameController extends ChangeNotifier {
   String? _whitePlayerName;
   String? _blackPlayerName;
   bool _moveInFlight = false;
+  String? _result;
 
   OnlineConnectionState get connectionState => _connectionState;
   bool get isConnected => _connectionState == OnlineConnectionState.connected;
@@ -38,7 +39,8 @@ class OnlineGameController extends ChangeNotifier {
   String? get myColor => _myColor;
   String get turnColor => _colorCode(_game.turn);
   bool get isMyTurn => _myColor != null && _myColor == turnColor;
-  bool get isGameOver => _game.game_over;
+  bool get isGameOver => _result != null || _game.game_over;
+  String? get resultCode => _result;
   String? get selectedSquare => _selectedSquare;
   Set<String> get legalTargets => _legalTargets;
   String? get lastMoveFrom => _lastMoveFrom;
@@ -63,6 +65,15 @@ class OnlineGameController extends ChangeNotifier {
     }
 
     if (isGameOver) {
+      switch (_result) {
+        case 'white_wins_checkmate':
+          return 'White wins by checkmate. Request new game to rematch.';
+        case 'black_wins_checkmate':
+          return 'Black wins by checkmate. Request new game to rematch.';
+        case 'draw':
+          return 'Draw game. Request new game to rematch.';
+      }
+
       if (_game.in_checkmate) {
         final winner = turnColor == 'w' ? 'Black' : 'White';
         return '$winner wins by checkmate.';
@@ -70,7 +81,8 @@ class OnlineGameController extends ChangeNotifier {
       if (_game.in_draw) {
         return 'Draw game.';
       }
-      return 'Game over.';
+
+      return 'Game over. Start a new game/rematch.';
     }
 
     if (_moveInFlight) {
@@ -112,7 +124,9 @@ class OnlineGameController extends ChangeNotifier {
 
       final body = _decodeResponseMap(response.body);
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception(body['error'] ?? 'Create invite failed (${response.statusCode}).');
+        throw Exception(
+          body['error'] ?? 'Create invite failed (${response.statusCode}).',
+        );
       }
 
       final matchId = body['matchId'] as String?;
@@ -168,7 +182,9 @@ class OnlineGameController extends ChangeNotifier {
 
       final body = _decodeResponseMap(response.body);
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception(body['error'] ?? 'Join invite failed (${response.statusCode}).');
+        throw Exception(
+          body['error'] ?? 'Join invite failed (${response.statusCode}).',
+        );
       }
 
       final matchId = body['matchId'] as String?;
@@ -256,6 +272,7 @@ class OnlineGameController extends ChangeNotifier {
     _status = 'disconnected';
     _matchId = null;
     _myColor = null;
+    _result = null;
     if (notify) {
       notifyListeners();
     }
@@ -426,6 +443,7 @@ class OnlineGameController extends ChangeNotifier {
     }
 
     _status = state['status'] as String? ?? _status;
+    _result = state['result'] as String?;
     _joinCode = state['joinCode'] as String? ?? _joinCode;
 
     final players = state['players'];

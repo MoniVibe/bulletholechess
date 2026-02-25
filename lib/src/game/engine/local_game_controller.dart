@@ -45,6 +45,7 @@ class LocalGameController extends ChangeNotifier {
   String? _lastMoveFrom;
   String? _lastMoveTo;
   String? _feedback;
+  String? _winnerColor;
   String? _queuedMoveFrom;
   String? _queuedMoveTo;
   String _queuedPromotion = 'q';
@@ -70,7 +71,15 @@ class LocalGameController extends ChangeNotifier {
 
   String get turnColor => _colorCode(_game.turn);
   String get turnLabel => turnColor == 'w' ? 'White' : 'Black';
-  bool get isGameOver => _game.game_over;
+  bool get isGameOver => _winnerColor != null || _game.in_draw;
+  String? get winnerColor => _winnerColor;
+  String? get winnerLabel {
+    if (_winnerColor == null) {
+      return null;
+    }
+    return _winnerColor == 'w' ? 'White' : 'Black';
+  }
+
   bool get aiMovePending => _aiMovePending;
   bool get canPlayerInteract => !isGameOver && _hasAnyLegalMove(playerColor);
   bool get hasQueuedMove => _queuedMoveFrom != null && _queuedMoveTo != null;
@@ -90,9 +99,8 @@ class LocalGameController extends ChangeNotifier {
   Map<String, String> get boardPieces => _boardPiecesFromFen(_game.fen);
 
   String get statusText {
-    if (_game.in_checkmate) {
-      final winner = turnColor == 'w' ? 'Black' : 'White';
-      return '$winner wins by checkmate.';
+    if (_winnerColor != null) {
+      return '${winnerLabel!} wins by checkmate. Start a new game.';
     }
     if (_game.in_draw) {
       return 'Draw game.';
@@ -162,7 +170,7 @@ class LocalGameController extends ChangeNotifier {
   }
 
   void tapSquare(String square) {
-    if (!canPlayerInteract) {
+    if (!canPlayerInteract || isGameOver) {
       return;
     }
 
@@ -187,12 +195,13 @@ class LocalGameController extends ChangeNotifier {
     }
 
     final from = _selectedSquare!;
-    final legalNow = _isMoveLegalNow(
+    final legalMove = _findValidatedLegalMove(
       from: from,
       to: square,
       color: playerColor,
       promotion: 'q',
     );
+    final legalNow = legalMove != null;
 
     if (legalNow) {
       final onCooldown = cooldownRemaining(playerColor).inMilliseconds > 0;
@@ -243,6 +252,7 @@ class LocalGameController extends ChangeNotifier {
     if (_disposed) {
       return;
     }
+    _refreshTerminalState();
     _tryExecuteQueuedPlayerMove();
     _maybeScheduleAiMove();
     notifyListeners();
@@ -301,10 +311,12 @@ class LocalGameController extends ChangeNotifier {
     _queuedMoveFrom = null;
     _queuedMoveTo = null;
     _queuedPromotion = 'q';
+    _winnerColor = null;
 
     final now = DateTime.now();
     _whiteReadyAt = now;
     _blackReadyAt = now;
+    _refreshTerminalState();
   }
 
   bool _applyMove({
@@ -313,7 +325,17 @@ class LocalGameController extends ChangeNotifier {
     required String moverColor,
     String promotion = 'q',
   }) {
-    if (cooldownRemaining(moverColor).inMilliseconds > 0) {
+    if (isGameOver || cooldownRemaining(moverColor).inMilliseconds > 0) {
+      return false;
+    }
+
+    final legalMove = _findValidatedLegalMove(
+      from: from,
+      to: to,
+      color: moverColor,
+      promotion: promotion,
+    );
+    if (legalMove == null) {
       return false;
     }
 
@@ -336,6 +358,7 @@ class LocalGameController extends ChangeNotifier {
     _lastMoveTo = to;
     _setCooldownForMover(moverColor);
     _refreshSelectionForCurrentBoard();
+    _refreshTerminalState();
     return true;
   }
 
@@ -374,7 +397,7 @@ class LocalGameController extends ChangeNotifier {
     return _withTurn(color, () => _game.in_check);
   }
 
-  bool _isMoveLegalNow({
+  Map<String, dynamic>? _findValidatedLegalMove({
     required String from,
     required String to,
     required String color,
@@ -383,18 +406,82 @@ class LocalGameController extends ChangeNotifier {
     return _withTurn(color, () {
       final legalMoves = _game
           .moves({'verbose': true})
-          .map((dynamic item) => Map<String, dynamic>.from(item as Map));
-      return legalMoves.any((move) {
+          .map((dynamic item) => Map<String, dynamic>.from(item as Map))
+          .toList();
+
+      for (final move in legalMoves) {
         if (move['from'] != from || move['to'] != to) {
-          return false;
+          continue;
         }
         final movePromotion = move['promotion'] as String?;
         if (movePromotion == null) {
-          return true;
+          if (_isEnPassantStructurallyValid(move: move, moverColor: color)) {
+            return move;
+          }
+          return null;
         }
-        return movePromotion == promotion;
-      });
+        if (movePromotion == promotion &&
+            _isEnPassantStructurallyValid(move: move, moverColor: color)) {
+          return move;
+        }
+      }
+
+      return null;
     });
+  }
+
+  bool _isEnPassantStructurallyValid({
+    required Map<String, dynamic> move,
+    required String moverColor,
+  }) {
+    final flags = move['flags'] as String? ?? '';
+    if (!flags.contains('e')) {
+      return true;
+    }
+
+    final from = move['from'] as String?;
+    final to = move['to'] as String?;
+    if (from == null || to == null) {
+      return false;
+    }
+
+    final fromFile = from.codeUnitAt(0);
+    final toFile = to.codeUnitAt(0);
+    final fromRank = int.tryParse(from[1]);
+    final toRank = int.tryParse(to[1]);
+    if (fromRank == null || toRank == null) {
+      return false;
+    }
+    if ((fromFile - toFile).abs() != 1) {
+      return false;
+    }
+
+    if (moverColor == 'w') {
+      if (fromRank != 5 || toRank != 6) {
+        return false;
+      }
+    } else {
+      if (fromRank != 4 || toRank != 3) {
+        return false;
+      }
+    }
+
+    final fenTokens = _game.fen.split(' ');
+    if (fenTokens.length < 4 || fenTokens[3] != to) {
+      return false;
+    }
+
+    final capturedRank = moverColor == 'w' ? toRank - 1 : toRank + 1;
+    final capturedSquare = '${to[0]}$capturedRank';
+    final capturedPiece = boardPieces[capturedSquare];
+    if (capturedPiece == null || capturedPiece.toLowerCase() != 'p') {
+      return false;
+    }
+    if (_pieceColor(capturedPiece) == moverColor) {
+      return false;
+    }
+
+    return true;
   }
 
   void _clearSelection() {
@@ -429,13 +516,13 @@ class LocalGameController extends ChangeNotifier {
     final from = _queuedMoveFrom!;
     final to = _queuedMoveTo!;
     final promotion = _queuedPromotion;
-    final legalNow = _isMoveLegalNow(
+    final legalMove = _findValidatedLegalMove(
       from: from,
       to: to,
       color: playerColor,
       promotion: promotion,
     );
-    if (!legalNow) {
+    if (legalMove == null) {
       _clearQueuedMove();
       _feedback = 'Queued move expired';
       return;
@@ -470,6 +557,32 @@ class LocalGameController extends ChangeNotifier {
     }
 
     _legalTargets = _legalDestinationsFrom(_selectedSquare!, playerColor);
+  }
+
+  void _refreshTerminalState() {
+    final winner = _detectCheckmateWinner();
+    _winnerColor = winner;
+
+    if (_winnerColor != null) {
+      _cancelAiTimer();
+      _aiMovePending = false;
+      _clearQueuedMove();
+      _clearSelection();
+    }
+  }
+
+  String? _detectCheckmateWinner() {
+    final whiteIsCheckmated = _withTurn('w', () => _game.in_checkmate);
+    if (whiteIsCheckmated) {
+      return 'b';
+    }
+
+    final blackIsCheckmated = _withTurn('b', () => _game.in_checkmate);
+    if (blackIsCheckmated) {
+      return 'w';
+    }
+
+    return null;
   }
 
   void _cancelAiTimer() {
