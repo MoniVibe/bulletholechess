@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart';
 import 'dumb_ai_engine.dart';
 
 class LocalGameController extends ChangeNotifier {
+  static const String _defaultPromotion = 'q';
+
   LocalGameController({
     Duration initialCooldownDuration = const Duration(seconds: 3),
     this.aiThinkDelayMin = const Duration(seconds: 2),
@@ -50,7 +52,7 @@ class LocalGameController extends ChangeNotifier {
   String? _winnerColor;
   String? _queuedMoveFrom;
   String? _queuedMoveTo;
-  String _queuedPromotion = 'q';
+  String _queuedPromotion = _defaultPromotion;
 
   int get version => _version;
   Duration get cooldownDuration => _cooldownDuration;
@@ -218,14 +220,18 @@ class LocalGameController extends ChangeNotifier {
       from: from,
       to: square,
       color: playerColor,
-      promotion: 'q',
+      promotion: _defaultPromotion,
     );
     final legalNow = legalMove != null;
 
     if (legalNow) {
       final onCooldown = cooldownRemaining(playerColor).inMilliseconds > 0;
       if (onCooldown) {
-        _queuePlayerMove(from: from, to: square, promotion: 'q');
+        _queuePlayerMove(
+          from: from,
+          to: square,
+          promotion: _defaultPromotion,
+        );
         _clearSelection();
         _feedback = null;
         notifyListeners();
@@ -250,7 +256,12 @@ class LocalGameController extends ChangeNotifier {
     if (isOwnPiece) {
       final onCooldown = cooldownRemaining(playerColor).inMilliseconds > 0;
       if (onCooldown && _selectedSquare != square) {
-        _queuePlayerMove(from: from, to: square, promotion: 'q');
+        // Allow speculative queueing (e.g. predicted recapture) while cooling down.
+        _queuePlayerMove(
+          from: from,
+          to: square,
+          promotion: _defaultPromotion,
+        );
         _clearSelection();
         _feedback = null;
         notifyListeners();
@@ -347,7 +358,7 @@ class LocalGameController extends ChangeNotifier {
     _aiMovePending = false;
     _queuedMoveFrom = null;
     _queuedMoveTo = null;
-    _queuedPromotion = 'q';
+    _queuedPromotion = _defaultPromotion;
     _winnerColor = null;
 
     final now = DateTime.now();
@@ -360,7 +371,7 @@ class LocalGameController extends ChangeNotifier {
     required String from,
     required String to,
     required String moverColor,
-    String promotion = 'q',
+    String promotion = _defaultPromotion,
   }) {
     if (!_hasActiveGame ||
         isGameOver ||
@@ -452,170 +463,26 @@ class LocalGameController extends ChangeNotifier {
       final legalMoves = _game
           .moves({'verbose': true})
           .map((dynamic item) => Map<String, dynamic>.from(item as Map))
+          .where((move) => move['from'] == from && move['to'] == to)
           .toList();
 
+      if (legalMoves.isEmpty) {
+        return null;
+      }
+
       for (final move in legalMoves) {
-        if (move['from'] != from || move['to'] != to) {
-          continue;
-        }
-        final movePromotion = move['promotion'] as String?;
-        if (movePromotion == null) {
-          if (_passesSpecialMoveValidation(move: move, moverColor: color)) {
-            return move;
-          }
-          return null;
-        }
-        if (movePromotion == promotion &&
-            _passesSpecialMoveValidation(move: move, moverColor: color)) {
+        if (move['promotion'] == promotion) {
           return move;
         }
       }
 
+      for (final move in legalMoves) {
+        if (move['promotion'] == null) {
+          return move;
+        }
+      }
       return null;
     });
-  }
-
-  bool _passesSpecialMoveValidation({
-    required Map<String, dynamic> move,
-    required String moverColor,
-  }) {
-    return _isEnPassantStructurallyValid(move: move, moverColor: moverColor) &&
-        _isCastlingStructurallyValid(move: move, moverColor: moverColor);
-  }
-
-  bool _isEnPassantStructurallyValid({
-    required Map<String, dynamic> move,
-    required String moverColor,
-  }) {
-    final flags = move['flags'] as String? ?? '';
-    if (!flags.contains('e')) {
-      return true;
-    }
-
-    final from = move['from'] as String?;
-    final to = move['to'] as String?;
-    if (from == null || to == null) {
-      return false;
-    }
-
-    final fromFile = from.codeUnitAt(0);
-    final toFile = to.codeUnitAt(0);
-    final fromRank = int.tryParse(from[1]);
-    final toRank = int.tryParse(to[1]);
-    if (fromRank == null || toRank == null) {
-      return false;
-    }
-    if ((fromFile - toFile).abs() != 1) {
-      return false;
-    }
-
-    if (moverColor == 'w') {
-      if (fromRank != 5 || toRank != 6) {
-        return false;
-      }
-    } else {
-      if (fromRank != 4 || toRank != 3) {
-        return false;
-      }
-    }
-
-    final fenTokens = _game.fen.split(' ');
-    if (fenTokens.length < 4 || fenTokens[3] != to) {
-      return false;
-    }
-
-    final capturedRank = moverColor == 'w' ? toRank - 1 : toRank + 1;
-    final capturedSquare = '${to[0]}$capturedRank';
-    final capturedPiece = boardPieces[capturedSquare];
-    if (capturedPiece == null || capturedPiece.toLowerCase() != 'p') {
-      return false;
-    }
-    if (_pieceColor(capturedPiece) == moverColor) {
-      return false;
-    }
-
-    return true;
-  }
-
-  bool _isCastlingStructurallyValid({
-    required Map<String, dynamic> move,
-    required String moverColor,
-  }) {
-    final flags = move['flags'] as String? ?? '';
-    final kingSide = flags.contains('k');
-    final queenSide = flags.contains('q');
-    if (!kingSide && !queenSide) {
-      return true;
-    }
-
-    final from = move['from'] as String?;
-    final to = move['to'] as String?;
-    if (from == null || to == null) {
-      return false;
-    }
-
-    final isWhite = moverColor == 'w';
-    final expectedFrom = isWhite ? 'e1' : 'e8';
-    if (from != expectedFrom) {
-      return false;
-    }
-
-    final expectedTo = kingSide
-        ? (isWhite ? 'g1' : 'g8')
-        : (isWhite ? 'c1' : 'c8');
-    if (to != expectedTo) {
-      return false;
-    }
-
-    final pieces = boardPieces;
-    final kingPiece = pieces[expectedFrom];
-    if (kingPiece == null ||
-        kingPiece.toLowerCase() != 'k' ||
-        _pieceColor(kingPiece) != moverColor) {
-      return false;
-    }
-
-    final rookSquare = kingSide
-        ? (isWhite ? 'h1' : 'h8')
-        : (isWhite ? 'a1' : 'a8');
-    final rookPiece = pieces[rookSquare];
-    if (rookPiece == null ||
-        rookPiece.toLowerCase() != 'r' ||
-        _pieceColor(rookPiece) != moverColor) {
-      return false;
-    }
-
-    final mustBeEmpty = kingSide
-        ? (isWhite ? const ['f1', 'g1'] : const ['f8', 'g8'])
-        : (isWhite ? const ['d1', 'c1', 'b1'] : const ['d8', 'c8', 'b8']);
-    for (final square in mustBeEmpty) {
-      if (pieces[square] != null) {
-        return false;
-      }
-    }
-
-    final enemyColor = isWhite ? chess.Color.BLACK : chess.Color.WHITE;
-    final kingPathSquares = kingSide
-        ? (isWhite ? const ['e1', 'f1', 'g1'] : const ['e8', 'f8', 'g8'])
-        : (isWhite ? const ['e1', 'd1', 'c1'] : const ['e8', 'd8', 'c8']);
-    for (final square in kingPathSquares) {
-      if (_isSquareThreatenedBy(square: square, byColor: enemyColor)) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  bool _isSquareThreatenedBy({
-    required String square,
-    required chess.Color byColor,
-  }) {
-    final index = chess.Chess.SQUARES[square];
-    if (index is! int) {
-      return false;
-    }
-    return _game.attacked(byColor, index);
   }
 
   void _clearSelection() {
@@ -636,7 +503,7 @@ class LocalGameController extends ChangeNotifier {
   void _clearQueuedMove() {
     _queuedMoveFrom = null;
     _queuedMoveTo = null;
-    _queuedPromotion = 'q';
+    _queuedPromotion = _defaultPromotion;
   }
 
   void _tryExecuteQueuedPlayerMove() {
