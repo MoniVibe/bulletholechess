@@ -1,8 +1,8 @@
 # Node Matchmaking + Game Backend
 
 This service provides:
-- `POST /api/matches/create` -> create invite code as White
-- `POST /api/matches/join` -> join invite code as Black
+- `POST /api/matches/join` -> auto-join open match or create one
+- `POST /api/matches/create` -> alias of join (kept for compatibility)
 - `GET /healthz` -> health
 - `WS /ws?matchId=...&playerId=...` -> real-time game channel
 
@@ -18,12 +18,12 @@ npm start
 Defaults:
 - bind `0.0.0.0`
 - port `8080`
-- match TTL `6h`
+- match TTL disabled (`0`)
 
 Env vars:
 - `PORT`
 - `BIND`
-- `MATCH_TTL_MS`
+- `MATCH_TTL_MS` (`>0` enables expiry cleanup)
 
 ## Docker
 

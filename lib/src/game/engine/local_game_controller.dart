@@ -71,7 +71,10 @@ class LocalGameController extends ChangeNotifier {
 
   bool get aiMovePending => _aiMovePending;
   bool get canPlayerInteract =>
-      _hasActiveGame && !isGameOver && _hasAnyLegalMove(playerColor);
+      _hasActiveGame &&
+      !isGameOver &&
+      !_isInCheckFor(playerColor) &&
+      _hasAnyLegalMove(playerColor);
   bool get hasQueuedMove => _queuedMoveFrom != null && _queuedMoveTo != null;
   String? get queuedMoveLabel {
     if (!hasQueuedMove) {
@@ -108,6 +111,14 @@ class LocalGameController extends ChangeNotifier {
     }
     if (_game.in_draw) {
       return 'Draw game.';
+    }
+
+    if (_isInCheckFor(playerColor)) {
+      return 'Your king is in check. Moves and queued moves are locked.';
+    }
+
+    if (_isInCheckFor(aiColor)) {
+      return 'Bot king is in check. Bot moves are locked.';
     }
 
     if (hasQueuedMove) {
@@ -175,6 +186,10 @@ class LocalGameController extends ChangeNotifier {
 
   void tapSquare(String square) {
     if (!canPlayerInteract || isGameOver) {
+      if (_isInCheckFor(playerColor) && !isGameOver) {
+        _feedback = 'Cannot move while your king is in check.';
+        notifyListeners();
+      }
       return;
     }
 
@@ -277,6 +292,7 @@ class LocalGameController extends ChangeNotifier {
     if (!_hasActiveGame ||
         _aiMovePending ||
         isGameOver ||
+        _isInCheckFor(aiColor) ||
         cooldownRemaining(aiColor).inMilliseconds > 0 ||
         !_hasAnyLegalMove(aiColor)) {
       return;
@@ -293,6 +309,7 @@ class LocalGameController extends ChangeNotifier {
 
     if (!_hasActiveGame ||
         isGameOver ||
+        _isInCheckFor(aiColor) ||
         cooldownRemaining(aiColor).inMilliseconds > 0 ||
         !_hasAnyLegalMove(aiColor)) {
       _aiMovePending = false;
@@ -347,6 +364,7 @@ class LocalGameController extends ChangeNotifier {
   }) {
     if (!_hasActiveGame ||
         isGameOver ||
+        _isInCheckFor(moverColor) ||
         cooldownRemaining(moverColor).inMilliseconds > 0) {
       return false;
     }
@@ -625,6 +643,11 @@ class LocalGameController extends ChangeNotifier {
     if (!_hasActiveGame || !hasQueuedMove || isGameOver) {
       return;
     }
+    if (_isInCheckFor(playerColor)) {
+      _clearQueuedMove();
+      _feedback = 'Queued move canceled: your king is in check.';
+      return;
+    }
     if (cooldownRemaining(playerColor).inMilliseconds > 0) {
       return;
     }
@@ -682,6 +705,14 @@ class LocalGameController extends ChangeNotifier {
     }
     final winner = _detectCheckmateWinner();
     _winnerColor = winner;
+    final playerInCheck = _isInCheckFor(playerColor);
+    if (playerInCheck) {
+      if (hasQueuedMove) {
+        _clearQueuedMove();
+        _feedback = 'Queued move canceled: your king is in check.';
+      }
+      _clearSelection();
+    }
 
     if (_winnerColor != null) {
       _cancelAiTimer();

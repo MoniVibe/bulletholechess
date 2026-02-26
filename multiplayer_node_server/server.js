@@ -8,7 +8,9 @@ const { WebSocketServer } = require('ws');
 
 const PORT = Number.parseInt(process.env.PORT || '8080', 10);
 const BIND = process.env.BIND || '0.0.0.0';
-const MATCH_TTL_MS = Number.parseInt(process.env.MATCH_TTL_MS || `${6 * 60 * 60 * 1000}`, 10);
+const MATCH_TTL_MS = Number.parseInt(process.env.MATCH_TTL_MS || '0', 10);
+const MATCH_TIMEOUT_ENABLED =
+  Number.isFinite(MATCH_TTL_MS) && MATCH_TTL_MS > 0;
 
 const app = express();
 app.use(cors());
@@ -16,77 +18,17 @@ app.use(express.json({ limit: '32kb' }));
 app.options('*', cors());
 
 const matches = new Map();
-const matchByJoinCode = new Map();
 
 app.get('/healthz', (_req, res) => {
   res.json({ ok: true, at: new Date().toISOString() });
 });
 
 app.post('/api/matches/create', (req, res) => {
-  const name = sanitizeName(req.body?.name);
-  if (!name) {
-    res.status(400).json({ error: 'Name is required (1-24 chars).' });
-    return;
-  }
-
-  const matchId = crypto.randomUUID();
-  const joinCode = generateJoinCode();
-  const playerId = crypto.randomUUID();
-
-  const match = createEmptyMatch({ matchId, joinCode });
-  match.players.white = { playerId, name, socket: null };
-  match.playersById.set(playerId, 'w');
-
-  matches.set(matchId, match);
-  matchByJoinCode.set(joinCode, matchId);
-
-  res.status(201).json({
-    matchId,
-    joinCode,
-    playerId,
-    color: 'w',
-    wsPath: '/ws',
-  });
+  joinOrCreate(req, res);
 });
 
 app.post('/api/matches/join', (req, res) => {
-  const rawJoinCode = String(req.body?.joinCode || '').trim().toUpperCase();
-  const name = sanitizeName(req.body?.name);
-  if (!rawJoinCode || !name) {
-    res.status(400).json({ error: 'joinCode and name are required.' });
-    return;
-  }
-
-  const matchId = matchByJoinCode.get(rawJoinCode);
-  if (!matchId) {
-    res.status(404).json({ error: 'Invite code not found.' });
-    return;
-  }
-
-  const match = matches.get(matchId);
-  if (!match || isExpired(match)) {
-    cleanupMatch(matchId);
-    res.status(404).json({ error: 'Invite expired.' });
-    return;
-  }
-
-  if (match.players.black) {
-    res.status(409).json({ error: 'Match already full.' });
-    return;
-  }
-
-  const playerId = crypto.randomUUID();
-  match.players.black = { playerId, name, socket: null };
-  match.playersById.set(playerId, 'b');
-  match.updatedAt = Date.now();
-
-  res.json({
-    matchId,
-    joinCode: match.joinCode,
-    playerId,
-    color: 'b',
-    wsPath: '/ws',
-  });
+  joinOrCreate(req, res);
 });
 
 const server = http.createServer(app);
@@ -98,15 +40,21 @@ wss.on('connection', (socket, req) => {
   const playerId = url.searchParams.get('playerId');
 
   if (!matchId || !playerId) {
-    sendJson(socket, { type: 'error', message: 'matchId and playerId are required.' });
+    sendJson(socket, {
+      type: 'error',
+      message: 'matchId and playerId are required.',
+    });
     socket.close(1008, 'Missing parameters');
     return;
   }
 
   const match = matches.get(matchId);
   if (!match || isExpired(match)) {
-    cleanupMatch(matchId);
-    sendJson(socket, { type: 'error', message: 'Match not found or expired.' });
+    cleanupMatch(matchId, {
+      notifyMessage: 'Match expired.',
+      closeReason: 'Match expired',
+    });
+    sendJson(socket, { type: 'error', message: 'Match not found.' });
     socket.close(1008, 'Match unavailable');
     return;
   }
@@ -118,8 +66,8 @@ wss.on('connection', (socket, req) => {
     return;
   }
 
-  const player = color === 'w' ? match.players.white : match.players.black;
-  if (!player) {
+  const player = playerForColor(match, color);
+  if (!player || player.playerId !== playerId) {
     sendJson(socket, { type: 'error', message: 'Player slot unavailable.' });
     socket.close(1008, 'Player unavailable');
     return;
@@ -135,7 +83,6 @@ wss.on('connection', (socket, req) => {
   sendJson(socket, {
     type: 'welcome',
     matchId,
-    joinCode: match.joinCode,
     playerId,
     color,
   });
@@ -159,30 +106,133 @@ wss.on('connection', (socket, req) => {
   });
 
   socket.on('close', () => {
-    if (player.socket === socket) {
-      player.socket = null;
-      match.updatedAt = Date.now();
-      broadcastToConnected(match, {
-        type: 'opponent_left',
-        message: 'Your opponent disconnected.',
-      });
-      broadcastState(match);
+    if (player.socket !== socket) {
+      return;
     }
+
+    player.socket = null;
+    match.playersById.delete(playerId);
+    clearColorSlot(match, color);
+    match.game = new Chess();
+    match.updatedAt = Date.now();
+
+    if (!match.players.white && !match.players.black) {
+      cleanupMatch(matchId);
+      return;
+    }
+
+    broadcastToConnected(match, {
+      type: 'opponent_left',
+      message: 'Your opponent disconnected.',
+    });
+    broadcastState(match);
   });
 });
 
-setInterval(() => {
-  const now = Date.now();
-  for (const [matchId, match] of matches.entries()) {
-    if (now - match.updatedAt > MATCH_TTL_MS) {
-      cleanupMatch(matchId);
-    }
-  }
-}, 30_000).unref();
+if (MATCH_TIMEOUT_ENABLED) {
+  setInterval(() => {
+    pruneExpiredMatches();
+  }, 30_000).unref();
+}
 
 server.listen(PORT, BIND, () => {
   console.log(`Bullethole backend listening on http://${BIND}:${PORT}`);
 });
+
+function joinOrCreate(req, res) {
+  const name = sanitizeName(req.body?.name);
+  if (!name) {
+    res.status(400).json({ error: 'Name is required (1-24 chars).' });
+    return;
+  }
+
+  pruneExpiredMatches();
+  const assignment = assignPlayerToMatch(name);
+  const status = assignment.created ? 201 : 200;
+  res.status(status).json({
+    matchId: assignment.match.matchId,
+    playerId: assignment.playerId,
+    color: assignment.color,
+    wsPath: '/ws',
+  });
+}
+
+function assignPlayerToMatch(name) {
+  const waitingMatch = findJoinableMatch();
+  if (waitingMatch) {
+    const color = openColorForMatch(waitingMatch);
+    const playerId = crypto.randomUUID();
+    const player = { playerId, name, socket: null };
+    setColorSlot(waitingMatch, color, player);
+    waitingMatch.playersById.set(playerId, color);
+    waitingMatch.updatedAt = Date.now();
+    return {
+      match: waitingMatch,
+      playerId,
+      color,
+      created: false,
+    };
+  }
+
+  const matchId = crypto.randomUUID();
+  const playerId = crypto.randomUUID();
+  const match = createEmptyMatch({ matchId });
+  match.players.white = { playerId, name, socket: null };
+  match.playersById.set(playerId, 'w');
+  matches.set(matchId, match);
+  return {
+    match,
+    playerId,
+    color: 'w',
+    created: true,
+  };
+}
+
+function findJoinableMatch() {
+  let candidate = null;
+  for (const match of matches.values()) {
+    if (isExpired(match)) {
+      continue;
+    }
+    if (!openColorForMatch(match)) {
+      continue;
+    }
+    if (!candidate || match.createdAt < candidate.createdAt) {
+      candidate = match;
+    }
+  }
+  return candidate;
+}
+
+function openColorForMatch(match) {
+  if (!match.players.white) {
+    return 'w';
+  }
+  if (!match.players.black) {
+    return 'b';
+  }
+  return null;
+}
+
+function playerForColor(match, color) {
+  return color === 'w' ? match.players.white : match.players.black;
+}
+
+function setColorSlot(match, color, player) {
+  if (color === 'w') {
+    match.players.white = player;
+  } else {
+    match.players.black = player;
+  }
+}
+
+function clearColorSlot(match, color) {
+  if (color === 'w') {
+    match.players.white = null;
+  } else {
+    match.players.black = null;
+  }
+}
 
 function handleSocketMessage({ match, color, socket, payload }) {
   const type = typeof payload.type === 'string' ? payload.type : '';
@@ -193,7 +243,10 @@ function handleSocketMessage({ match, color, socket, payload }) {
         return;
       }
       if (match.game.isGameOver()) {
-        sendJson(socket, { type: 'error', message: 'Game over. Start a new game.' });
+        sendJson(socket, {
+          type: 'error',
+          message: 'Game over. Start a new game.',
+        });
         return;
       }
       if (match.game.turn() !== color) {
@@ -205,7 +258,10 @@ function handleSocketMessage({ match, color, socket, payload }) {
       const to = sanitizeSquare(payload.to);
       const promotion = sanitizePromotion(payload.promotion);
       if (!from || !to) {
-        sendJson(socket, { type: 'error', message: 'Invalid move coordinates.' });
+        sendJson(socket, {
+          type: 'error',
+          message: 'Invalid move coordinates.',
+        });
         return;
       }
 
@@ -231,14 +287,16 @@ function handleSocketMessage({ match, color, socket, payload }) {
       sendJson(socket, { type: 'pong', at: new Date().toISOString() });
       return;
     default:
-      sendJson(socket, { type: 'error', message: `Unknown message type: ${type}` });
+      sendJson(socket, {
+        type: 'error',
+        message: `Unknown message type: ${type}`,
+      });
   }
 }
 
-function createEmptyMatch({ matchId, joinCode }) {
+function createEmptyMatch({ matchId }) {
   return {
     matchId,
-    joinCode,
     players: {
       white: null,
       black: null,
@@ -257,7 +315,6 @@ function broadcastState(match, lastMove = null) {
     type: 'state',
     sequence: match.sequence,
     matchId: match.matchId,
-    joinCode: match.joinCode,
     status: match.players.white && match.players.black ? 'active' : 'waiting',
     fen: match.game.fen(),
     turn: match.game.turn(),
@@ -287,42 +344,57 @@ function broadcastToConnected(match, payload) {
   }
 }
 
-function cleanupMatch(matchId) {
+function cleanupMatch(matchId, options = {}) {
   const match = matches.get(matchId);
   if (!match) {
     return;
   }
 
+  const {
+    notifyMessage = null,
+    closeCode = 1001,
+    closeReason = 'Match closed',
+  } = options;
+
   for (const p of [match.players.white, match.players.black]) {
-    if (p && p.socket && p.socket.readyState === p.socket.OPEN) {
-      sendJson(p.socket, { type: 'error', message: 'Match expired.' });
-      p.socket.close(1001, 'Match expired');
+    if (!p || !p.socket || p.socket.readyState !== p.socket.OPEN) {
+      continue;
     }
+    if (notifyMessage) {
+      sendJson(p.socket, { type: 'error', message: notifyMessage });
+    }
+    p.socket.close(closeCode, closeReason);
   }
 
-  matchByJoinCode.delete(match.joinCode);
   matches.delete(matchId);
+}
+
+function pruneExpiredMatches() {
+  if (!MATCH_TIMEOUT_ENABLED) {
+    return;
+  }
+
+  const now = Date.now();
+  for (const [matchId, match] of matches.entries()) {
+    if (now - match.updatedAt > MATCH_TTL_MS) {
+      cleanupMatch(matchId, {
+        notifyMessage: 'Match expired.',
+        closeReason: 'Match expired',
+      });
+    }
+  }
 }
 
 function gameResult(game) {
   if (game.isCheckmate()) {
-    return game.turn() === 'w' ? 'black_wins_checkmate' : 'white_wins_checkmate';
+    return game.turn() === 'w'
+      ? 'black_wins_checkmate'
+      : 'white_wins_checkmate';
   }
   if (game.isDraw()) {
     return 'draw';
   }
   return 'game_over';
-}
-
-function generateJoinCode() {
-  for (let attempts = 0; attempts < 20; attempts += 1) {
-    const code = crypto.randomInt(0, 36 ** 6).toString(36).toUpperCase().padStart(6, '0');
-    if (!matchByJoinCode.has(code)) {
-      return code;
-    }
-  }
-
-  return crypto.randomUUID().slice(0, 6).toUpperCase();
 }
 
 function sanitizeName(value) {
@@ -353,6 +425,9 @@ function sanitizePromotion(value) {
 }
 
 function isExpired(match) {
+  if (!MATCH_TIMEOUT_ENABLED) {
+    return false;
+  }
   return Date.now() - match.updatedAt > MATCH_TTL_MS;
 }
 
