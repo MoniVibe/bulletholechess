@@ -117,7 +117,9 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                       ),
                       const SizedBox(height: 8),
                       OutlinedButton.icon(
-                        onPressed: connected ? _controller.requestNewGame : null,
+                        onPressed: connected
+                            ? _controller.requestNewGame
+                            : null,
                         icon: const Icon(Icons.replay, size: 16),
                         label: const Text('Request New Game'),
                       ),
@@ -156,6 +158,10 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                             label: 'Black',
                             value: _controller.blackPlayerName ?? '-',
                           ),
+                          _InfoChip(
+                            label: 'Opp Last',
+                            value: _controller.opponentLastMoveLabel ?? '-',
+                          ),
                         ],
                       ),
                       const SizedBox(height: 8),
@@ -189,6 +195,9 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                       legalTargets: _controller.legalTargets,
                       lastMoveFrom: _controller.lastMoveFrom,
                       lastMoveTo: _controller.lastMoveTo,
+                      lastMoveHighlightColor: _controller.isOpponentLastMove
+                          ? const Color(0xFFE57373)
+                          : const Color(0xFFD7CA64),
                       onSquareTap: _controller.tapSquare,
                     ),
                   ),

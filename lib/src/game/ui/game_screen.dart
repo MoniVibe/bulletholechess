@@ -100,7 +100,9 @@ class _GameScreenState extends State<GameScreen> {
           Card(
             elevation: 0,
             color: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
             child: Column(
               children: [
                 ListTile(
@@ -204,7 +206,9 @@ class _GameScreenState extends State<GameScreen> {
           Card(
             elevation: 0,
             color: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
@@ -212,7 +216,10 @@ class _GameScreenState extends State<GameScreen> {
                 children: [
                   Text(
                     _controller.statusText,
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   if (_controller.feedback != null) ...[
                     const SizedBox(height: 4),
@@ -243,9 +250,15 @@ class _GameScreenState extends State<GameScreen> {
                         value: _controller.queuedMoveLabel ?? '-',
                       ),
                       _InfoChip(
+                        label: 'Opp Last',
+                        value: _controller.opponentLastMoveLabel ?? '-',
+                      ),
+                      _InfoChip(
                         label: 'You',
                         value: _formatDuration(
-                          _controller.cooldownRemaining(_controller.playerColor),
+                          _controller.cooldownRemaining(
+                            _controller.playerColor,
+                          ),
                         ),
                       ),
                       _InfoChip(
@@ -269,7 +282,10 @@ class _GameScreenState extends State<GameScreen> {
                   const sideGap = 10.0;
                   final maxBoardWidth =
                       constraints.maxWidth - (sideBarWidth * 2) - (sideGap * 2);
-                  final boardSize = math.min(maxBoardWidth, constraints.maxHeight);
+                  final boardSize = math.min(
+                    maxBoardWidth,
+                    constraints.maxHeight,
+                  );
                   if (boardSize <= 0) {
                     return const SizedBox.shrink();
                   }
@@ -302,6 +318,10 @@ class _GameScreenState extends State<GameScreen> {
                             legalTargets: _controller.legalTargets,
                             lastMoveFrom: _controller.lastMoveFrom,
                             lastMoveTo: _controller.lastMoveTo,
+                            lastMoveHighlightColor:
+                                _controller.isOpponentLastMove
+                                ? const Color(0xFFE57373)
+                                : const Color(0xFFD7CA64),
                             onSquareTap: _controller.tapSquare,
                           ),
                         ),
@@ -326,7 +346,9 @@ class _GameScreenState extends State<GameScreen> {
           Card(
             elevation: 0,
             color: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Row(
@@ -484,7 +506,11 @@ class _SideCooldownBar extends StatelessWidget {
               bottom: 6,
               left: 0,
               right: 0,
-              child: const Icon(Icons.person, size: 12, color: Color(0xFF1A1A1A)),
+              child: const Icon(
+                Icons.person,
+                size: 12,
+                color: Color(0xFF1A1A1A),
+              ),
             ),
         ],
       ),

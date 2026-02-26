@@ -9,6 +9,7 @@ class ChessBoardView extends StatelessWidget {
     this.legalTargets = const <String>{},
     this.lastMoveFrom,
     this.lastMoveTo,
+    this.lastMoveHighlightColor = const Color(0xFFD7CA64),
     super.key,
   });
 
@@ -18,6 +19,7 @@ class ChessBoardView extends StatelessWidget {
   final Set<String> legalTargets;
   final String? lastMoveFrom;
   final String? lastMoveTo;
+  final Color lastMoveHighlightColor;
   final ValueChanged<String> onSquareTap;
 
   static const _files = 'abcdefgh';
@@ -59,7 +61,7 @@ class ChessBoardView extends StatelessWidget {
                 ? const Color(0xFF8D6E63)
                 : const Color(0xFFE8D7C7);
             final squareColor = isLastMoveSquare
-                ? const Color(0xFFD7CA64)
+                ? lastMoveHighlightColor
                 : baseColor;
 
             return Material(
