@@ -27,6 +27,26 @@ Optional CLI usage:
 .\launch-dev.ps1 -DryRun
 ```
 
+### Android split APK build (release)
+
+- Double-click `build-apk-split.cmd` from repo root.
+- It runs `flutter build apk --release --split-per-abi` and prints SHA-256 hashes.
+
+Optional CLI usage:
+
+```powershell
+.\build-apk-split.ps1
+.\build-apk-split.ps1 -Clean
+.\build-apk-split.ps1 -FlutterExe "C:\dev\flutter\bin\flutter.bat"
+```
+
+Output folder:
+
+- `build\app\outputs\flutter-apk\`
+- `app-arm64-v8a-release.apk` (most modern Android phones)
+- `app-armeabi-v7a-release.apk` (older 32-bit phones)
+- `app-x86_64-release.apk` (mostly emulators)
+
 ### Windows quick launch for AI-vs-AI bug hunt
 
 - Double-click `run-ai-duel.cmd` from repo root.
