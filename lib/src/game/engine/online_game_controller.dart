@@ -16,6 +16,7 @@ class OnlineGameController extends ChangeNotifier {
   static const String _defaultPromotion = ChessRules.defaultPromotion;
   static const Duration _defaultHealthTimeout = Duration(seconds: 5);
   static const Duration _defaultWakeTimeout = Duration(seconds: 15);
+  static const int _maxDebugLogEntries = 400;
 
   OnlineGameController({
     Duration initialCooldownDuration = const Duration(seconds: 3),
@@ -72,6 +73,12 @@ class OnlineGameController extends ChangeNotifier {
   String? _queuedMoveFrom;
   String? _queuedMoveTo;
   String _queuedPromotion = _defaultPromotion;
+  int _queueToken = 0;
+  int _nextClientMoveId = 1;
+  int? _inFlightClientMoveId;
+  String? _inFlightMoveSource;
+  int? _inFlightQueueToken;
+  final List<String> _debugLogEntries = <String>[];
 
   OnlineConnectionState get connectionState => _connectionState;
   bool get isConnected => _connectionState == OnlineConnectionState.connected;
@@ -124,6 +131,8 @@ class OnlineGameController extends ChangeNotifier {
   }
 
   String? get feedback => _feedback;
+  List<String> get debugLogEntries =>
+      List.unmodifiable(_debugLogEntries.reversed.toList(growable: false));
   BackendHealthState get backendHealthState => _backendHealthState;
   String? get backendHealthMessage => _backendHealthMessage;
   DateTime? get backendHealthCheckedAt => _backendHealthCheckedAt;
@@ -208,10 +217,65 @@ class OnlineGameController extends ChangeNotifier {
     return Duration(milliseconds: remaining);
   }
 
+  void clearDebugLog() {
+    _debugLogEntries.clear();
+    notifyListeners();
+  }
+
+  String buildDebugReport({int maxEntries = 250}) {
+    final header = <String>[
+      'Bullethole Chess Debug Report',
+      'generatedAt=${DateTime.now().toIso8601String()}',
+      'connectionState=${_connectionState.name}',
+      'matchId=${_matchId ?? '-'}',
+      'status=$_status',
+      'myColor=${_myColor ?? '-'}',
+      'turn=$turnColor',
+      'result=${_result ?? '-'}',
+      'cooldownSeconds=${_cooldownDuration.inSeconds}',
+      'cooldownRemainingWMs=${cooldownRemaining('w').inMilliseconds}',
+      'cooldownRemainingBMs=${cooldownRemaining('b').inMilliseconds}',
+      'hasQueuedMove=$hasQueuedMove',
+      'queueToken=$_queueToken',
+      'queuedMove=${queuedMoveLabel ?? '-'}',
+      'inFlightMoveId=${_inFlightClientMoveId?.toString() ?? '-'}',
+      'inFlightSource=${_inFlightMoveSource ?? '-'}',
+      'inFlightQueueToken=${_inFlightQueueToken?.toString() ?? '-'}',
+      'historyLen=${history.length}',
+      '--- events ---',
+    ];
+
+    final start = _debugLogEntries.length > maxEntries
+        ? _debugLogEntries.length - maxEntries
+        : 0;
+    final lines = _debugLogEntries.sublist(start);
+    return <String>[...header, ...lines].join('\n');
+  }
+
   void clearQueuedMove() {
     if (!hasQueuedMove) {
       return;
     }
+    if (_moveInFlight && _inFlightMoveSource == 'queued') {
+      _logEvent(
+        'queue_clear_blocked_in_flight',
+        details: <String, Object?>{
+          'clientMoveId': _inFlightClientMoveId,
+          'queueToken': _inFlightQueueToken,
+        },
+      );
+      _feedback = 'Queued move already sent; cannot cancel now.';
+      notifyListeners();
+      return;
+    }
+    _logEvent(
+      'queue_cleared_by_user',
+      details: <String, Object?>{
+        'queueToken': _queueToken,
+        'from': _queuedMoveFrom,
+        'to': _queuedMoveTo,
+      },
+    );
     _clearQueuedMove();
     _feedback = 'Queued move cleared';
     notifyListeners();
@@ -224,11 +288,20 @@ class OnlineGameController extends ChangeNotifier {
   }) async {
     final normalizedName = displayName.trim();
     if (normalizedName.isEmpty) {
+      _logEvent('matchmaking_missing_name');
       _feedback = 'Display name is required.';
       notifyListeners();
       return;
     }
 
+    _logEvent(
+      'matchmaking_start',
+      details: <String, Object?>{
+        'apiBase': apiBaseUrl.trim(),
+        'name': normalizedName,
+        'cooldownSeconds': cooldownSeconds,
+      },
+    );
     _connectionState = OnlineConnectionState.connecting;
     _feedback = null;
     if (cooldownSeconds != null && cooldownSeconds > 0) {
@@ -251,6 +324,13 @@ class OnlineGameController extends ChangeNotifier {
 
       final body = _decodeResponseMap(response.body);
       if (response.statusCode < 200 || response.statusCode >= 300) {
+        _logEvent(
+          'matchmaking_http_error',
+          details: <String, Object?>{
+            'status': response.statusCode,
+            'body': response.body,
+          },
+        );
         throw Exception(
           body['error'] ?? 'Matchmaking failed (${response.statusCode}).',
         );
@@ -274,7 +354,19 @@ class OnlineGameController extends ChangeNotifier {
         matchId: matchId,
         playerId: playerId,
       );
+      _logEvent(
+        'matchmaking_success',
+        details: <String, Object?>{
+          'matchId': matchId,
+          'playerId': playerId,
+          'cooldownSeconds': _cooldownDuration.inSeconds,
+        },
+      );
     } catch (error) {
+      _logEvent(
+        'matchmaking_failed',
+        details: <String, Object?>{'error': error.toString()},
+      );
       _connectionState = OnlineConnectionState.disconnected;
       _feedback = 'Matchmaking failed: $error';
       notifyListeners();
@@ -334,6 +426,13 @@ class OnlineGameController extends ChangeNotifier {
   }
 
   Future<void> disconnect({bool notify = true}) async {
+    _logEvent(
+      'disconnect',
+      details: <String, Object?>{
+        'matchId': _matchId,
+        'connectionState': _connectionState.name,
+      },
+    );
     _moveInFlight = false;
     _clearSelection();
     _clearQueuedMove();
@@ -357,6 +456,9 @@ class OnlineGameController extends ChangeNotifier {
     _result = null;
     _sequence = 0;
     _clockOffsetMs = 0;
+    _inFlightClientMoveId = null;
+    _inFlightMoveSource = null;
+    _inFlightQueueToken = null;
     final now = DateTime.now().millisecondsSinceEpoch;
     _whiteReadyAtMs = now;
     _blackReadyAtMs = now;
@@ -369,6 +471,16 @@ class OnlineGameController extends ChangeNotifier {
   void tapSquare(String square) {
     final color = _myColor;
     if (color == null || !canPlayerInteract || isGameOver) {
+      _logEvent(
+        'tap_ignored',
+        details: <String, Object?>{
+          'square': square,
+          'color': color,
+          'canInteract': canPlayerInteract,
+          'isGameOver': isGameOver,
+          'status': _status,
+        },
+      );
       return;
     }
 
@@ -409,6 +521,15 @@ class OnlineGameController extends ChangeNotifier {
     if (legalNow) {
       final onCooldown = cooldownRemaining(color).inMilliseconds > 0;
       if (onCooldown) {
+        _logEvent(
+          'queue_move',
+          details: <String, Object?>{
+            'from': from,
+            'to': square,
+            'reason': 'cooldown',
+            'remainingMs': cooldownRemaining(color).inMilliseconds,
+          },
+        );
         _queuePlayerMove(from: from, to: square, promotion: _defaultPromotion);
         _clearSelection();
         _feedback = null;
@@ -420,8 +541,19 @@ class OnlineGameController extends ChangeNotifier {
         from: from,
         to: square,
         promotion: _defaultPromotion,
+        source: 'manual',
       );
       if (sent) {
+        _logEvent(
+          'send_move',
+          details: <String, Object?>{
+            'from': from,
+            'to': square,
+            'promotion': _defaultPromotion,
+            'source': 'manual',
+            'clientMoveId': _inFlightClientMoveId,
+          },
+        );
         _clearQueuedMove();
         _clearSelection();
         _feedback = null;
@@ -434,6 +566,15 @@ class OnlineGameController extends ChangeNotifier {
       final onCooldown = cooldownRemaining(color).inMilliseconds > 0;
       if (onCooldown && _selectedSquare != square) {
         // Allow speculative queueing (e.g. predicted recapture) while cooling down.
+        _logEvent(
+          'queue_move',
+          details: <String, Object?>{
+            'from': from,
+            'to': square,
+            'reason': 'speculative_recapture',
+            'remainingMs': cooldownRemaining(color).inMilliseconds,
+          },
+        );
         _queuePlayerMove(from: from, to: square, promotion: _defaultPromotion);
         _clearSelection();
         _feedback = null;
@@ -452,11 +593,16 @@ class OnlineGameController extends ChangeNotifier {
     }
 
     _feedback = 'Illegal move';
+    _logEvent(
+      'illegal_move_tap',
+      details: <String, Object?>{'selectedFrom': _selectedSquare, 'to': square},
+    );
     notifyListeners();
   }
 
   void requestNewGame({int? cooldownSeconds}) {
     if (!isConnected) {
+      _logEvent('new_game_ignored_disconnected');
       return;
     }
     final payload = <String, dynamic>{'type': 'new_game'};
@@ -464,6 +610,12 @@ class OnlineGameController extends ChangeNotifier {
       payload['cooldownSeconds'] = cooldownSeconds;
       _cooldownDuration = Duration(seconds: cooldownSeconds);
     }
+    _logEvent(
+      'new_game_requested',
+      details: <String, Object?>{
+        'cooldownSeconds': cooldownSeconds ?? _cooldownDuration.inSeconds,
+      },
+    );
     _send(payload);
     notifyListeners();
   }
@@ -472,6 +624,10 @@ class OnlineGameController extends ChangeNotifier {
     required String apiBaseUrl,
     Duration timeout = _defaultHealthTimeout,
   }) async {
+    _logEvent(
+      'backend_health_check_start',
+      details: <String, Object?>{'apiBase': apiBaseUrl.trim()},
+    );
     _backendHealthState = BackendHealthState.checking;
     _backendHealthMessage = null;
     notifyListeners();
@@ -497,12 +653,24 @@ class OnlineGameController extends ChangeNotifier {
           : body['error'] as String? ??
                 'Health endpoint failed (${response.statusCode}).';
       _backendHealthCheckedAt = DateTime.now();
+      _logEvent(
+        'backend_health_check_result',
+        details: <String, Object?>{
+          'ok': ok,
+          'statusCode': response.statusCode,
+          'message': _backendHealthMessage,
+        },
+      );
       notifyListeners();
       return ok;
     } catch (error) {
       _backendHealthState = BackendHealthState.unhealthy;
       _backendHealthMessage = 'Health check failed: $error';
       _backendHealthCheckedAt = DateTime.now();
+      _logEvent(
+        'backend_health_check_failed',
+        details: <String, Object?>{'error': error.toString()},
+      );
       notifyListeners();
       return false;
     }
@@ -510,6 +678,10 @@ class OnlineGameController extends ChangeNotifier {
 
   Future<bool> wakeBackend({required String apiBaseUrl}) async {
     // Some hosts scale containers to zero. A direct request can trigger wake-up.
+    _logEvent(
+      'backend_wake_start',
+      details: <String, Object?>{'apiBase': apiBaseUrl.trim()},
+    );
     _backendHealthState = BackendHealthState.checking;
     _backendHealthMessage = 'Requesting backend wake-up...';
     notifyListeners();
@@ -537,12 +709,24 @@ class OnlineGameController extends ChangeNotifier {
           : body['error'] as String? ??
                 'Wake-up request failed (${response.statusCode}).';
       _backendHealthCheckedAt = DateTime.now();
+      _logEvent(
+        'backend_wake_result',
+        details: <String, Object?>{
+          'ok': ok,
+          'statusCode': response.statusCode,
+          'message': _backendHealthMessage,
+        },
+      );
       notifyListeners();
       return ok;
     } catch (error) {
       _backendHealthState = BackendHealthState.unhealthy;
       _backendHealthMessage = 'Wake-up failed: $error';
       _backendHealthCheckedAt = DateTime.now();
+      _logEvent(
+        'backend_wake_failed',
+        details: <String, Object?>{'error': error.toString()},
+      );
       notifyListeners();
       return false;
     }
@@ -577,19 +761,113 @@ class OnlineGameController extends ChangeNotifier {
     required String from,
     required String to,
     required String promotion,
+    required String source,
+    int? queueToken,
   }) {
     if (!isConnected || _status != 'active' || _moveInFlight) {
+      _logEvent(
+        'send_move_blocked',
+        details: <String, Object?>{
+          'from': from,
+          'to': to,
+          'status': _status,
+          'isConnected': isConnected,
+          'moveInFlight': _moveInFlight,
+        },
+      );
       return false;
     }
 
-    _send(<String, dynamic>{
+    final moveId = _nextClientMoveId++;
+    final payload = <String, dynamic>{
       'type': 'move',
       'from': from,
       'to': to,
       'promotion': promotion,
-    });
+      'clientMoveId': moveId,
+      'source': source,
+      'queueToken': queueToken,
+    };
+    if (queueToken == null) {
+      payload.remove('queueToken');
+    }
+    _send(payload);
     _moveInFlight = true;
+    _inFlightClientMoveId = moveId;
+    _inFlightMoveSource = source;
+    _inFlightQueueToken = queueToken;
+    _logEvent(
+      'send_move_payload',
+      details: <String, Object?>{
+        'clientMoveId': moveId,
+        'source': source,
+        'queueToken': queueToken,
+        'from': from,
+        'to': to,
+        'promotion': promotion,
+      },
+    );
     return true;
+  }
+
+  Future<int> pullServerDebugLogs({
+    required String apiBaseUrl,
+    int limit = 120,
+  }) async {
+    final normalizedLimit = limit.clamp(1, 500);
+    _logEvent(
+      'server_logs_pull_start',
+      details: <String, Object?>{
+        'apiBase': apiBaseUrl.trim(),
+        'limit': normalizedLimit,
+        'matchId': _matchId,
+      },
+    );
+
+    try {
+      final baseUri = _parseBaseUri(apiBaseUrl);
+      final query = <String, String>{'limit': '$normalizedLimit'};
+      if (_matchId?.isNotEmpty ?? false) {
+        query['matchId'] = _matchId!;
+      }
+      final response = await _httpClient
+          .get(baseUri.resolve('/debug/logs').replace(queryParameters: query))
+          .timeout(_defaultHealthTimeout);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('Server debug logs failed (${response.statusCode})');
+      }
+
+      final body = _decodeResponseMap(response.body);
+      final items = body['items'];
+      if (items is! List) {
+        _logEvent('server_logs_pull_empty');
+        return 0;
+      }
+
+      var appended = 0;
+      for (final raw in items) {
+        if (raw is! Map) {
+          continue;
+        }
+        final map = Map<String, dynamic>.from(raw);
+        _appendServerLogLine(map);
+        appended += 1;
+      }
+
+      _logEvent(
+        'server_logs_pull_success',
+        details: <String, Object?>{'appended': appended},
+      );
+      notifyListeners();
+      return appended;
+    } catch (error) {
+      _logEvent(
+        'server_logs_pull_failed',
+        details: <String, Object?>{'error': error.toString()},
+      );
+      notifyListeners();
+      return 0;
+    }
   }
 
   void _tryExecuteQueuedPlayerMove() {
@@ -604,6 +882,7 @@ class OnlineGameController extends ChangeNotifier {
     final from = _queuedMoveFrom!;
     final to = _queuedMoveTo!;
     final promotion = _queuedPromotion;
+    final queueToken = _queueToken;
     final legalMove = ChessRules.findValidatedLegalMove(
       game: _game,
       from: from,
@@ -612,13 +891,32 @@ class OnlineGameController extends ChangeNotifier {
       promotion: promotion,
     );
     if (legalMove == null) {
+      _logEvent(
+        'queued_move_cleared_illegal',
+        details: <String, Object?>{'from': from, 'to': to},
+      );
       _clearQueuedMove();
       _feedback = null;
       return;
     }
 
-    final sent = _sendMove(from: from, to: to, promotion: promotion);
+    final sent = _sendMove(
+      from: from,
+      to: to,
+      promotion: promotion,
+      source: 'queued',
+      queueToken: queueToken,
+    );
     if (sent) {
+      _logEvent(
+        'queued_move_executing',
+        details: <String, Object?>{
+          'queueToken': queueToken,
+          'from': from,
+          'to': to,
+          'promotion': promotion,
+        },
+      );
       _feedback = null;
     }
   }
@@ -628,12 +926,33 @@ class OnlineGameController extends ChangeNotifier {
     required String to,
     required String promotion,
   }) {
+    _queueToken += 1;
     _queuedMoveFrom = from;
     _queuedMoveTo = to;
     _queuedPromotion = promotion;
+    _logEvent(
+      'queue_set',
+      details: <String, Object?>{
+        'queueToken': _queueToken,
+        'from': from,
+        'to': to,
+        'promotion': promotion,
+      },
+    );
   }
 
   void _clearQueuedMove() {
+    if (_queuedMoveFrom != null && _queuedMoveTo != null) {
+      _logEvent(
+        'queue_cleared',
+        details: <String, Object?>{
+          'queueToken': _queueToken,
+          'from': _queuedMoveFrom,
+          'to': _queuedMoveTo,
+        },
+      );
+    }
+    _queueToken += 1;
     _queuedMoveFrom = null;
     _queuedMoveTo = null;
     _queuedPromotion = _defaultPromotion;
@@ -645,6 +964,14 @@ class OnlineGameController extends ChangeNotifier {
     required String matchId,
     required String playerId,
   }) async {
+    _logEvent(
+      'ws_connect_start',
+      details: <String, Object?>{
+        'matchId': matchId,
+        'playerId': playerId,
+        'wsPath': wsPath,
+      },
+    );
     await disconnect(notify: false);
 
     final wsUri = _wsUriFromBase(baseUri, wsPath, <String, String>{
@@ -659,11 +986,16 @@ class OnlineGameController extends ChangeNotifier {
       _subscription = channel.stream.listen(
         _onMessage,
         onError: (Object error) {
+          _logEvent(
+            'ws_stream_error',
+            details: <String, Object?>{'error': error.toString()},
+          );
           _feedback = 'Connection error: $error';
           _connectionState = OnlineConnectionState.disconnected;
           notifyListeners();
         },
         onDone: () {
+          _logEvent('ws_stream_done');
           _connectionState = OnlineConnectionState.disconnected;
           _feedback = 'Disconnected from server.';
           notifyListeners();
@@ -672,8 +1004,13 @@ class OnlineGameController extends ChangeNotifier {
       );
 
       _connectionState = OnlineConnectionState.connected;
+      _logEvent('ws_connected', details: <String, Object?>{'matchId': matchId});
       notifyListeners();
     } catch (error) {
+      _logEvent(
+        'ws_connect_failed',
+        details: <String, Object?>{'error': error.toString()},
+      );
       _connectionState = OnlineConnectionState.disconnected;
       _feedback = 'Unable to connect game socket: $error';
       notifyListeners();
@@ -682,6 +1019,7 @@ class OnlineGameController extends ChangeNotifier {
 
   void _onMessage(dynamic raw) {
     if (raw is! String) {
+      _logEvent('ws_message_ignored_non_string');
       return;
     }
 
@@ -689,15 +1027,18 @@ class OnlineGameController extends ChangeNotifier {
     try {
       final decoded = jsonDecode(raw);
       if (decoded is! Map) {
+        _logEvent('ws_message_ignored_non_map');
         return;
       }
       map = Map<String, dynamic>.from(decoded);
     } catch (_) {
+      _logEvent('ws_message_parse_failed');
       return;
     }
 
     final type = map['type'];
     if (type is! String) {
+      _logEvent('ws_message_missing_type');
       return;
     }
 
@@ -717,17 +1058,32 @@ class OnlineGameController extends ChangeNotifier {
         }
 
         _feedback = null;
+        _logEvent(
+          'ws_welcome',
+          details: <String, Object?>{
+            'matchId': _matchId,
+            'myColor': _myColor,
+            'cooldownSeconds': _cooldownDuration.inSeconds,
+          },
+        );
         notifyListeners();
         return;
       case 'state':
         _applyState(map);
         return;
       case 'opponent_left':
+        _logEvent(
+          'ws_opponent_left',
+          details: <String, Object?>{'message': map['message']},
+        );
         _feedback = map['message'] as String? ?? 'Opponent disconnected.';
         notifyListeners();
         return;
       case 'error':
         _moveInFlight = false;
+        _inFlightClientMoveId = null;
+        _inFlightMoveSource = null;
+        _inFlightQueueToken = null;
         final errorCode = map['code'] as String?;
         final message = map['message'] as String? ?? 'Server error';
         _feedback = message;
@@ -749,13 +1105,30 @@ class OnlineGameController extends ChangeNotifier {
         }
 
         if (hasQueuedMove && !_isRetriableQueueError(errorCode, message)) {
+          _logEvent(
+            'queued_move_cleared_on_error',
+            details: <String, Object?>{'code': errorCode, 'message': message},
+          );
           _clearQueuedMove();
         }
+        _logEvent(
+          'ws_error',
+          details: <String, Object?>{
+            'code': errorCode,
+            'message': message,
+            'matchId': _matchId,
+          },
+        );
         notifyListeners();
         return;
       case 'pong':
+        _logEvent('ws_pong');
         return;
       default:
+        _logEvent(
+          'ws_message_unknown_type',
+          details: <String, Object?>{'type': type},
+        );
         return;
     }
   }
@@ -763,6 +1136,13 @@ class OnlineGameController extends ChangeNotifier {
   void _applyState(Map<String, dynamic> state) {
     final nextSequence = state['sequence'] as int? ?? (_sequence + 1);
     if (nextSequence < _sequence) {
+      _logEvent(
+        'state_ignored_outdated',
+        details: <String, Object?>{
+          'nextSequence': nextSequence,
+          'currentSequence': _sequence,
+        },
+      );
       return;
     }
     _sequence = nextSequence;
@@ -799,6 +1179,7 @@ class OnlineGameController extends ChangeNotifier {
     if (fen != null) {
       final loaded = _game.load(fen);
       if (!loaded) {
+        _logEvent('state_invalid_fen', details: <String, Object?>{'fen': fen});
         _feedback = 'Received invalid board state from server.';
       }
     }
@@ -816,6 +1197,9 @@ class OnlineGameController extends ChangeNotifier {
     if (lastMove is Map<String, dynamic>) {
       _lastMoveFrom = lastMove['from'] as String?;
       _lastMoveTo = lastMove['to'] as String?;
+      final lastMoveId = _readInt(lastMove['clientMoveId']);
+      final lastMoveSource = lastMove['source'] as String?;
+      final lastMoveQueueToken = _readInt(lastMove['queueToken']);
       final turnAfterMove = state['turn'] as String? ?? turnColor;
       final moverColor = ChessRules.oppositeColor(turnAfterMove);
       _lastMoverColor = moverColor;
@@ -832,7 +1216,28 @@ class OnlineGameController extends ChangeNotifier {
           moverColor == _myColor &&
           _queuedMoveFrom == _lastMoveFrom &&
           _queuedMoveTo == _lastMoveTo) {
+        _logEvent(
+          'queued_move_confirmed',
+          details: <String, Object?>{'from': _lastMoveFrom, 'to': _lastMoveTo},
+        );
         _clearQueuedMove();
+      }
+      if (_myColor != null &&
+          moverColor == _myColor &&
+          _inFlightClientMoveId != null &&
+          lastMoveId != null &&
+          _inFlightClientMoveId == lastMoveId) {
+        _logEvent(
+          'in_flight_move_confirmed',
+          details: <String, Object?>{
+            'clientMoveId': lastMoveId,
+            'source': lastMoveSource,
+            'queueToken': lastMoveQueueToken,
+          },
+        );
+        _inFlightClientMoveId = null;
+        _inFlightMoveSource = null;
+        _inFlightQueueToken = null;
       }
     } else {
       final history = state['history'];
@@ -849,6 +1254,16 @@ class OnlineGameController extends ChangeNotifier {
     }
 
     _moveInFlight = false;
+    _logEvent(
+      'state_applied',
+      details: <String, Object?>{
+        'sequence': _sequence,
+        'status': _status,
+        'turn': turnColor,
+        'result': _result,
+        'historyLen': history.length,
+      },
+    );
     _refreshSelectionForCurrentBoard();
     notifyListeners();
   }
@@ -890,6 +1305,48 @@ class OnlineGameController extends ChangeNotifier {
       return true;
     }
     return message.toLowerCase().contains('cooldown');
+  }
+
+  void _logEvent(
+    String event, {
+    Map<String, Object?> details = const <String, Object?>{},
+  }) {
+    final ts = DateTime.now().toIso8601String();
+    final detailText = details.entries
+        .where((entry) => entry.value != null)
+        .map((entry) => '${entry.key}=${entry.value}')
+        .join(', ');
+    final line = detailText.isEmpty
+        ? '[$ts] $event'
+        : '[$ts] $event | $detailText';
+    _debugLogEntries.add(line);
+    while (_debugLogEntries.length > _maxDebugLogEntries) {
+      _debugLogEntries.removeAt(0);
+    }
+    if (kDebugMode) {
+      debugPrint('[online] $line');
+    }
+  }
+
+  void _appendServerLogLine(Map<String, dynamic> entry) {
+    final at = entry['at']?.toString() ?? '-';
+    final event = entry['event']?.toString() ?? 'unknown';
+    final level = entry['level']?.toString() ?? 'info';
+    final excluded = <String>{'id', 'at', 'event', 'level'};
+    final details = entry.entries
+        .where((e) => !excluded.contains(e.key) && e.value != null)
+        .map((e) => '${e.key}=${e.value}')
+        .join(', ');
+    final line = details.isEmpty
+        ? '[server $at] $event | level=$level'
+        : '[server $at] $event | level=$level, $details';
+    _debugLogEntries.add(line);
+    while (_debugLogEntries.length > _maxDebugLogEntries) {
+      _debugLogEntries.removeAt(0);
+    }
+    if (kDebugMode) {
+      debugPrint('[online] $line');
+    }
   }
 
   static Uri _parseBaseUri(String raw) {
