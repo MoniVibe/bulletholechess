@@ -47,6 +47,28 @@ Output folder:
 - `app-armeabi-v7a-release.apk` (older 32-bit phones)
 - `app-x86_64-release.apk` (mostly emulators)
 
+### iOS build shortcut
+
+iOS builds require macOS + Xcode (cannot be produced on Windows directly).
+
+- On Windows, `build-ios.cmd` prints the exact macOS command.
+- On macOS, run from repo root:
+
+```bash
+./build-ios.sh --no-codesign
+```
+
+For signed IPA export:
+
+```bash
+./build-ios.sh --export-options-plist ios/ExportOptions.plist
+```
+
+Output paths:
+
+- unsigned zip (from `--no-codesign`): `build/ios/iphoneos/Runner-no-codesign.zip`
+- signed IPA (when signing succeeds): `build/ios/ipa/Runner.ipa`
+
 ### Windows quick launch for AI-vs-AI bug hunt
 
 - Double-click `run-ai-duel.cmd` from repo root.
