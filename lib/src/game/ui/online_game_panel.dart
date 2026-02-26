@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../engine/online_game_controller.dart';
 import 'chess_board_view.dart';
@@ -26,6 +27,7 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
   bool _connecting = false;
   bool _backendActionInFlight = false;
   bool _isMatchMenuOpen = false;
+  bool _isDebugLogOpen = false;
   int _selectedCooldownSeconds = 3;
 
   @override
@@ -242,6 +244,150 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                       ],
                     ],
                   ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Card(
+                elevation: 0,
+                color: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Column(
+                  children: [
+                    ListTile(
+                      dense: true,
+                      title: const Text(
+                        'Debug Log',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      subtitle: Text(
+                        '${_controller.debugLogEntries.length} events',
+                      ),
+                      trailing: Icon(
+                        _isDebugLogOpen
+                            ? Icons.keyboard_arrow_up
+                            : Icons.keyboard_arrow_down,
+                      ),
+                      onTap: () {
+                        setState(() {
+                          _isDebugLogOpen = !_isDebugLogOpen;
+                        });
+                      },
+                    ),
+                    AnimatedCrossFade(
+                      firstChild: const SizedBox.shrink(),
+                      secondChild: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                OutlinedButton.icon(
+                                  onPressed: _controller.debugLogEntries.isEmpty
+                                      ? null
+                                      : _controller.clearDebugLog,
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    size: 16,
+                                  ),
+                                  label: const Text('Clear Log'),
+                                ),
+                                const SizedBox(width: 8),
+                                OutlinedButton.icon(
+                                  onPressed: _controller.debugLogEntries.isEmpty
+                                      ? null
+                                      : _copyDebugReport,
+                                  icon: const Icon(
+                                    Icons.copy_all_outlined,
+                                    size: 16,
+                                  ),
+                                  label: const Text('Copy Report'),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                FilledButton.tonalIcon(
+                                  onPressed: _backendActionInFlight
+                                      ? null
+                                      : _pullServerLogs,
+                                  icon: const Icon(
+                                    Icons.download_outlined,
+                                    size: 16,
+                                  ),
+                                  label: const Text('Pull Server Logs'),
+                                ),
+                                const SizedBox(width: 8),
+                                const Expanded(
+                                  child: Text(
+                                    'Includes matchmaking, ownership validation, queue lifecycle, and socket events.',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFF4E4A45),
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Container(
+                              width: double.infinity,
+                              constraints: const BoxConstraints(maxHeight: 180),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF7F4EF),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: const Color(0xFFD7D0C5),
+                                ),
+                              ),
+                              child: _controller.debugLogEntries.isEmpty
+                                  ? const Padding(
+                                      padding: EdgeInsets.all(12),
+                                      child: Text(
+                                        'No debug events yet.',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Color(0xFF4E4A45),
+                                        ),
+                                      ),
+                                    )
+                                  : ListView.separated(
+                                      shrinkWrap: true,
+                                      padding: const EdgeInsets.all(10),
+                                      itemCount:
+                                          _controller.debugLogEntries.length >
+                                              60
+                                          ? 60
+                                          : _controller.debugLogEntries.length,
+                                      separatorBuilder: (_, _) =>
+                                          const SizedBox(height: 6),
+                                      itemBuilder: (context, index) {
+                                        return SelectableText(
+                                          _controller.debugLogEntries[index],
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            height: 1.3,
+                                            fontFamily: 'monospace',
+                                            color: Color(0xFF1A1A1A),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      crossFadeState: _isDebugLogOpen
+                          ? CrossFadeState.showSecond
+                          : CrossFadeState.showFirst,
+                      duration: const Duration(milliseconds: 180),
+                      sizeCurve: Curves.easeOutCubic,
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 10),
@@ -519,12 +665,11 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
     try {
       await _controller.checkBackendHealth(apiBaseUrl: _apiBaseController.text);
     } finally {
-      if (!mounted) {
-        return;
+      if (mounted) {
+        setState(() {
+          _backendActionInFlight = false;
+        });
       }
-      setState(() {
-        _backendActionInFlight = false;
-      });
     }
   }
 
@@ -538,13 +683,44 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
     try {
       await _controller.wakeBackend(apiBaseUrl: _apiBaseController.text);
     } finally {
-      if (!mounted) {
-        return;
+      if (mounted) {
+        setState(() {
+          _backendActionInFlight = false;
+        });
       }
-      setState(() {
-        _backendActionInFlight = false;
-      });
     }
+  }
+
+  Future<void> _copyDebugReport() async {
+    final text = _controller.buildDebugReport();
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Debug report copied.')));
+  }
+
+  Future<void> _pullServerLogs() async {
+    if (_backendActionInFlight) {
+      return;
+    }
+    setState(() {
+      _backendActionInFlight = true;
+    });
+    final count = await _controller.pullServerDebugLogs(
+      apiBaseUrl: _apiBaseController.text,
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _backendActionInFlight = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Pulled $count server log entries.')),
+    );
   }
 }
 
