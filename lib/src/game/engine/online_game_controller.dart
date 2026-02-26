@@ -99,7 +99,7 @@ class OnlineGameController extends ChangeNotifier {
     if (!isConnected || _status != 'active' || color == null || isGameOver) {
       return false;
     }
-    return !_isInCheckFor(color) && _hasAnyLegalMove(color);
+    return _hasAnyLegalMove(color);
   }
 
   String? get opponentLastMoveLabel {
@@ -155,7 +155,7 @@ class OnlineGameController extends ChangeNotifier {
     }
 
     if (_isInCheckFor(color)) {
-      return 'Your king is in check. Moves and queued moves are locked.';
+      return 'Your king is in check. Play a legal response.';
     }
 
     if (hasQueuedMove) {
@@ -351,10 +351,6 @@ class OnlineGameController extends ChangeNotifier {
   void tapSquare(String square) {
     final color = _myColor;
     if (color == null || !canPlayerInteract || isGameOver) {
-      if (color != null && _isInCheckFor(color) && !isGameOver) {
-        _feedback = 'Cannot move while your king is in check.';
-        notifyListeners();
-      }
       return;
     }
 
@@ -497,11 +493,6 @@ class OnlineGameController extends ChangeNotifier {
   void _tryExecuteQueuedPlayerMove() {
     final color = _myColor;
     if (color == null || !hasQueuedMove || isGameOver || _moveInFlight) {
-      return;
-    }
-    if (_isInCheckFor(color)) {
-      _clearQueuedMove();
-      _feedback = 'Queued move canceled: your king is in check.';
       return;
     }
     if (cooldownRemaining(color).inMilliseconds > 0) {
@@ -752,12 +743,6 @@ class OnlineGameController extends ChangeNotifier {
         _lastMoverColor = null;
         _clearQueuedMove();
       }
-    }
-
-    final color = _myColor;
-    if (color != null && hasQueuedMove && _isInCheckFor(color)) {
-      _clearQueuedMove();
-      _feedback = 'Queued move canceled: your king is in check.';
     }
 
     _moveInFlight = false;

@@ -88,18 +88,23 @@ jobs:
               has_ttl="true"
             fi
 
-            registry_args=()
+            has_registry_creds="false"
             if [ -n "${MATCHMAKER_REGISTRY_USERNAME:-}" ] && [ -n "${MATCHMAKER_REGISTRY_PASSWORD:-}" ]; then
-              registry_args=(
-                --registry-server "$login_server"
-                --registry-username "$MATCHMAKER_REGISTRY_USERNAME"
-                --registry-password "$MATCHMAKER_REGISTRY_PASSWORD"
-              )
+              has_registry_creds="true"
             else
               echo "MATCHMAKER_REGISTRY_USERNAME/PASSWORD not set. Container App must already have pull access to $login_server."
             fi
 
             if az containerapp show --name matchmaker --resource-group chess >/dev/null 2>&1; then
+              if [ "$has_registry_creds" = "true" ]; then
+                az containerapp registry set \
+                  --name matchmaker \
+                  --resource-group chess \
+                  --server "$login_server" \
+                  --username "$MATCHMAKER_REGISTRY_USERNAME" \
+                  --password "$MATCHMAKER_REGISTRY_PASSWORD"
+              fi
+
               if [ "$has_ttl" = "true" ]; then
                 az containerapp update \
                   --name matchmaker \
@@ -107,41 +112,68 @@ jobs:
                   --image "$image_ref" \
                   --min-replicas "$min_replicas" \
                   --max-replicas "$max_replicas" \
-                  --set-env-vars "MATCH_TTL_MS=${MATCH_TTL_MS}" \
-                  "${registry_args[@]}"
+                  --set-env-vars "MATCH_TTL_MS=${MATCH_TTL_MS}"
               else
                 az containerapp update \
                   --name matchmaker \
                   --resource-group chess \
                   --image "$image_ref" \
                   --min-replicas "$min_replicas" \
-                  --max-replicas "$max_replicas" \
-                  "${registry_args[@]}"
+                  --max-replicas "$max_replicas"
               fi
             else
               if [ "$has_ttl" = "true" ]; then
-                az containerapp create \
-                  --name matchmaker \
-                  --resource-group chess \
-                  --environment managedEnvironment-chess-a634 \
-                  --image "$image_ref" \
-                  --ingress external \
-                  --target-port 8080 \
-                  --min-replicas "$min_replicas" \
-                  --max-replicas "$max_replicas" \
-                  --env-vars "MATCH_TTL_MS=${MATCH_TTL_MS}" \
-                  "${registry_args[@]}"
+                if [ "$has_registry_creds" = "true" ]; then
+                  az containerapp create \
+                    --name matchmaker \
+                    --resource-group chess \
+                    --environment managedEnvironment-chess-a634 \
+                    --image "$image_ref" \
+                    --ingress external \
+                    --target-port 8080 \
+                    --min-replicas "$min_replicas" \
+                    --max-replicas "$max_replicas" \
+                    --env-vars "MATCH_TTL_MS=${MATCH_TTL_MS}" \
+                    --registry-server "$login_server" \
+                    --registry-username "$MATCHMAKER_REGISTRY_USERNAME" \
+                    --registry-password "$MATCHMAKER_REGISTRY_PASSWORD"
+                else
+                  az containerapp create \
+                    --name matchmaker \
+                    --resource-group chess \
+                    --environment managedEnvironment-chess-a634 \
+                    --image "$image_ref" \
+                    --ingress external \
+                    --target-port 8080 \
+                    --min-replicas "$min_replicas" \
+                    --max-replicas "$max_replicas" \
+                    --env-vars "MATCH_TTL_MS=${MATCH_TTL_MS}"
+                fi
               else
-                az containerapp create \
-                  --name matchmaker \
-                  --resource-group chess \
-                  --environment managedEnvironment-chess-a634 \
-                  --image "$image_ref" \
-                  --ingress external \
-                  --target-port 8080 \
-                  --min-replicas "$min_replicas" \
-                  --max-replicas "$max_replicas" \
-                  "${registry_args[@]}"
+                if [ "$has_registry_creds" = "true" ]; then
+                  az containerapp create \
+                    --name matchmaker \
+                    --resource-group chess \
+                    --environment managedEnvironment-chess-a634 \
+                    --image "$image_ref" \
+                    --ingress external \
+                    --target-port 8080 \
+                    --min-replicas "$min_replicas" \
+                    --max-replicas "$max_replicas" \
+                    --registry-server "$login_server" \
+                    --registry-username "$MATCHMAKER_REGISTRY_USERNAME" \
+                    --registry-password "$MATCHMAKER_REGISTRY_PASSWORD"
+                else
+                  az containerapp create \
+                    --name matchmaker \
+                    --resource-group chess \
+                    --environment managedEnvironment-chess-a634 \
+                    --image "$image_ref" \
+                    --ingress external \
+                    --target-port 8080 \
+                    --min-replicas "$min_replicas" \
+                    --max-replicas "$max_replicas"
+                fi
               fi
             fi
 

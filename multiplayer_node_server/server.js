@@ -274,14 +274,6 @@ function handleSocketMessage({ match, color, socket, payload }) {
         return;
       }
 
-      if (isInCheckForColor(match.game, color)) {
-        sendJson(socket, {
-          type: 'error',
-          message: 'Your king is in check. Moves and queued moves are locked.',
-        });
-        return;
-      }
-
       const now = Date.now();
       const readyAt = match.cooldownEndsAt[color] || 0;
       if (now < readyAt) {
