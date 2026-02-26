@@ -27,6 +27,62 @@ Optional CLI usage:
 .\launch-dev.ps1 -DryRun
 ```
 
+### Windows quick launch for AI-vs-AI bug hunt
+
+- Double-click `run-ai-duel.cmd` from repo root.
+- It picks a random seed and writes logs under `debug/`.
+
+Optional CLI usage:
+
+```powershell
+.\run-ai-duel.ps1
+.\run-ai-duel.ps1 -Games 300 -MaxPlies 260
+.\run-ai-duel.ps1 -Seed 123456 -Games 80
+.\run-ai-duel.ps1 -Games 150 -MaxConversionFailures 3
+```
+
+## Flutter Side-Project CI Clone
+
+This repo now includes a dedicated Flutter-only CI lane that is separate from Azure deploy workflows:
+
+- `.github/workflows/flutter-side-ci.yml`
+  - runs on PRs/pushes for Flutter files
+  - checks formatting, `flutter analyze`, `flutter test`
+  - runs deterministic AI-vs-AI smoke duels
+  - fails if `conversion_failure` count exceeds threshold
+  - uploads `ai-duel-weird-logs-smoke` artifact (JSONL + PGN dumps)
+- `.github/workflows/flutter-side-nightly-ai-duels.yml`
+  - nightly stress duels for bug hunting
+  - can also be run manually via `workflow_dispatch`
+  - enforces a higher `conversion_failure` threshold for long runs
+  - uploads `ai-duel-weird-logs-nightly` artifact (JSONL + PGN dumps)
+
+Local duel command:
+
+```bash
+dart run tool/ai_duel.dart --games=60 --max-plies=220 --seed=20260226 --conversion-fail-cap-adv=5
+```
+
+Local duel command with weird-log file output:
+
+```bash
+dart run tool/ai_duel.dart --games=150 --max-plies=240 --seed=20260226 --conversion-fail-cap-adv=5 --max-conversion-failures=3 --log-file=debug/ai-duel-weird.jsonl
+```
+
+Local duel command with explicit PGN dump folder:
+
+```bash
+dart run tool/ai_duel.dart --games=150 --max-plies=240 --seed=20260226 --log-file=debug/ai-duel-weird.jsonl --pgn-dir=debug/ai-duel-weird-pgn
+```
+
+If `--log-file` is provided and `--pgn-dir` is omitted, PGNs are written automatically to a sibling folder based on log name (for example `debug/ai-duel-weird.jsonl` -> `debug/ai-duel-weird-pgn`).
+
+Weird logs include capped games, repeated positions (loop-like behavior), long no-progress sequences, and `conversion_failure` events.
+Each weird event also includes `legalMoveCount` and `materialSignature` for faster diagnosis.
+For capped events, logs also include `materialAdvantageAtCap` (white minus black material score).
+If a duel fails, the script prints the seed, game index, ply, FEN, and recent moves.
+Summary output also includes termination-reason counts (checkmates, draw reasons, capped, failures) and conversion-failure totals.
+
 ## Seamless Cross-Continent Multiplayer (Prototype)
 
 Use the Node backend in `multiplayer_node_server/` and deploy it to one public HTTPS URL.
