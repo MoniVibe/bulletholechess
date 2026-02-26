@@ -39,6 +39,26 @@ jobs:
 
             az extension add --name containerapp --upgrade --allow-preview true
 
+            # Required resource providers for `az containerapp up --source`.
+            required_providers=(
+              "Microsoft.App"
+              "Microsoft.OperationalInsights"
+              "Microsoft.ContainerRegistry"
+            )
+
+            for ns in "${required_providers[@]}"; do
+              state="$(az provider show --namespace "$ns" --query registrationState -o tsv || true)"
+              if [ "$state" != "Registered" ]; then
+                echo "Registering provider: $ns (current: ${state:-unknown})"
+                if ! az provider register --namespace "$ns" --wait; then
+                  echo "Failed to register provider $ns."
+                  echo "Grant this identity permission to register providers (Contributor/Owner on subscription),"
+                  echo "or register it once from Azure Portal: Subscriptions > <your-subscription> > Resource providers."
+                  exit 1
+                fi
+              fi
+            done
+
             az containerapp up \
               --name matchmaker \
               --resource-group chess \
