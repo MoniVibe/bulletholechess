@@ -10,12 +10,19 @@ import 'chess_rules.dart';
 
 enum OnlineConnectionState { disconnected, connecting, connected }
 
+enum BackendHealthState { unknown, checking, healthy, unhealthy }
+
 class OnlineGameController extends ChangeNotifier {
   static const String _defaultPromotion = ChessRules.defaultPromotion;
+  static const Duration _defaultHealthTimeout = Duration(seconds: 5);
+  static const Duration _defaultWakeTimeout = Duration(seconds: 15);
 
   OnlineGameController({
     Duration initialCooldownDuration = const Duration(seconds: 3),
+    http.Client? httpClient,
   }) : _cooldownDuration = initialCooldownDuration {
+    _httpClient = httpClient ?? http.Client();
+    _ownsHttpClient = httpClient == null;
     final now = DateTime.now().millisecondsSinceEpoch;
     _whiteReadyAtMs = now;
     _blackReadyAtMs = now;
@@ -28,6 +35,8 @@ class OnlineGameController extends ChangeNotifier {
   final chess.Chess _game = chess.Chess();
 
   late final Timer _ticker;
+  late final http.Client _httpClient;
+  late final bool _ownsHttpClient;
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
 
@@ -39,6 +48,9 @@ class OnlineGameController extends ChangeNotifier {
   int _blackReadyAtMs = 0;
   bool _disposed = false;
   bool _moveInFlight = false;
+  BackendHealthState _backendHealthState = BackendHealthState.unknown;
+  String? _backendHealthMessage;
+  DateTime? _backendHealthCheckedAt;
 
   String? _selectedSquare;
   Set<String> _legalTargets = <String>{};
@@ -112,7 +124,11 @@ class OnlineGameController extends ChangeNotifier {
   }
 
   String? get feedback => _feedback;
-  Map<String, String> get boardPieces => ChessRules.boardPiecesFromFen(_game.fen);
+  BackendHealthState get backendHealthState => _backendHealthState;
+  String? get backendHealthMessage => _backendHealthMessage;
+  DateTime? get backendHealthCheckedAt => _backendHealthCheckedAt;
+  Map<String, String> get boardPieces =>
+      ChessRules.boardPiecesFromFen(_game.fen);
   List<String> get history => _game.getHistory().cast<String>();
   String get playerColor => _myColor ?? 'w';
   String? get whitePlayerName => _whitePlayerName;
@@ -393,11 +409,7 @@ class OnlineGameController extends ChangeNotifier {
     if (legalNow) {
       final onCooldown = cooldownRemaining(color).inMilliseconds > 0;
       if (onCooldown) {
-        _queuePlayerMove(
-          from: from,
-          to: square,
-          promotion: _defaultPromotion,
-        );
+        _queuePlayerMove(from: from, to: square, promotion: _defaultPromotion);
         _clearSelection();
         _feedback = null;
         notifyListeners();
@@ -422,11 +434,7 @@ class OnlineGameController extends ChangeNotifier {
       final onCooldown = cooldownRemaining(color).inMilliseconds > 0;
       if (onCooldown && _selectedSquare != square) {
         // Allow speculative queueing (e.g. predicted recapture) while cooling down.
-        _queuePlayerMove(
-          from: from,
-          to: square,
-          promotion: _defaultPromotion,
-        );
+        _queuePlayerMove(from: from, to: square, promotion: _defaultPromotion);
         _clearSelection();
         _feedback = null;
         notifyListeners();
@@ -460,11 +468,94 @@ class OnlineGameController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<bool> checkBackendHealth({
+    required String apiBaseUrl,
+    Duration timeout = _defaultHealthTimeout,
+  }) async {
+    _backendHealthState = BackendHealthState.checking;
+    _backendHealthMessage = null;
+    notifyListeners();
+
+    try {
+      final baseUri = _parseBaseUri(apiBaseUrl);
+      final response = await _httpClient
+          .get(
+            baseUri.resolve('/healthz'),
+            headers: const {'accept': 'application/json'},
+          )
+          .timeout(timeout);
+      final body = _decodeResponseMap(response.body);
+      final ok =
+          response.statusCode >= 200 &&
+          response.statusCode < 300 &&
+          (body.isEmpty || body['ok'] == true);
+      _backendHealthState = ok
+          ? BackendHealthState.healthy
+          : BackendHealthState.unhealthy;
+      _backendHealthMessage = ok
+          ? null
+          : body['error'] as String? ??
+                'Health endpoint failed (${response.statusCode}).';
+      _backendHealthCheckedAt = DateTime.now();
+      notifyListeners();
+      return ok;
+    } catch (error) {
+      _backendHealthState = BackendHealthState.unhealthy;
+      _backendHealthMessage = 'Health check failed: $error';
+      _backendHealthCheckedAt = DateTime.now();
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> wakeBackend({required String apiBaseUrl}) async {
+    // Some hosts scale containers to zero. A direct request can trigger wake-up.
+    _backendHealthState = BackendHealthState.checking;
+    _backendHealthMessage = 'Requesting backend wake-up...';
+    notifyListeners();
+
+    try {
+      final baseUri = _parseBaseUri(apiBaseUrl);
+      final response = await _httpClient
+          .get(
+            baseUri
+                .resolve('/healthz')
+                .replace(queryParameters: const {'wake': '1'}),
+            headers: const {'accept': 'application/json'},
+          )
+          .timeout(_defaultWakeTimeout);
+      final body = _decodeResponseMap(response.body);
+      final ok =
+          response.statusCode >= 200 &&
+          response.statusCode < 300 &&
+          (body.isEmpty || body['ok'] == true);
+      _backendHealthState = ok
+          ? BackendHealthState.healthy
+          : BackendHealthState.unhealthy;
+      _backendHealthMessage = ok
+          ? null
+          : body['error'] as String? ??
+                'Wake-up request failed (${response.statusCode}).';
+      _backendHealthCheckedAt = DateTime.now();
+      notifyListeners();
+      return ok;
+    } catch (error) {
+      _backendHealthState = BackendHealthState.unhealthy;
+      _backendHealthMessage = 'Wake-up failed: $error';
+      _backendHealthCheckedAt = DateTime.now();
+      notifyListeners();
+      return false;
+    }
+  }
+
   @override
   void dispose() {
     _disposed = true;
     _ticker.cancel();
     disconnect(notify: false);
+    if (_ownsHttpClient) {
+      _httpClient.close();
+    }
     super.dispose();
   }
 
@@ -846,5 +937,4 @@ class OnlineGameController extends ChangeNotifier {
     }
     return null;
   }
-
 }
