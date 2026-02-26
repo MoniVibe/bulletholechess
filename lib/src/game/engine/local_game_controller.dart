@@ -4,10 +4,11 @@ import 'dart:math';
 import 'package:chess/chess.dart' as chess;
 import 'package:flutter/foundation.dart';
 
+import 'chess_rules.dart';
 import 'dumb_ai_engine.dart';
 
 class LocalGameController extends ChangeNotifier {
-  static const String _defaultPromotion = 'q';
+  static const String _defaultPromotion = ChessRules.defaultPromotion;
 
   LocalGameController({
     Duration initialCooldownDuration = const Duration(seconds: 3),
@@ -57,10 +58,10 @@ class LocalGameController extends ChangeNotifier {
   int get version => _version;
   Duration get cooldownDuration => _cooldownDuration;
   String get playerColor => _playerColor;
-  String get aiColor => _otherColor(playerColor);
+  String get aiColor => ChessRules.oppositeColor(playerColor);
   bool get hasActiveGame => _hasActiveGame;
 
-  String get turnColor => _colorCode(_game.turn);
+  String get turnColor => ChessRules.colorCode(_game.turn);
   String get turnLabel => turnColor == 'w' ? 'White' : 'Black';
   bool get isGameOver => _winnerColor != null || _game.in_draw;
   String? get winnerColor => _winnerColor;
@@ -75,7 +76,7 @@ class LocalGameController extends ChangeNotifier {
   bool get canPlayerInteract =>
       _hasActiveGame &&
       !isGameOver &&
-      _hasAnyLegalMove(playerColor);
+      ChessRules.hasAnyLegalMove(_game, playerColor);
   bool get hasQueuedMove => _queuedMoveFrom != null && _queuedMoveTo != null;
   String? get queuedMoveLabel {
     if (!hasQueuedMove) {
@@ -101,7 +102,7 @@ class LocalGameController extends ChangeNotifier {
 
   String? get feedback => _feedback;
   List<String> get history => _game.getHistory().cast<String>();
-  Map<String, String> get boardPieces => _boardPiecesFromFen(_game.fen);
+  Map<String, String> get boardPieces => ChessRules.boardPiecesFromFen(_game.fen);
 
   String get statusText {
     if (!_hasActiveGame) {
@@ -114,14 +115,14 @@ class LocalGameController extends ChangeNotifier {
       return 'Draw game.';
     }
 
-    if (_isInCheckFor(playerColor)) {
+    if (ChessRules.isInCheckFor(_game, playerColor)) {
       return 'Your king is in check. Play a legal response.';
     }
 
     if (hasQueuedMove) {
       final remaining = cooldownRemaining(playerColor);
       if (remaining.inMilliseconds > 0) {
-        return 'Queued $queuedMoveLabel (${_formatDuration(remaining)}).';
+        return 'Queued $queuedMoveLabel (${ChessRules.formatDuration(remaining)}).';
       }
       return 'Queued $queuedMoveLabel. Executing...';
     }
@@ -129,7 +130,7 @@ class LocalGameController extends ChangeNotifier {
     final playerReady = cooldownRemaining(playerColor).inMilliseconds == 0;
     final botReady = cooldownRemaining(aiColor).inMilliseconds == 0;
     if (playerReady && botReady) {
-      if (_isInCheckFor(playerColor)) {
+      if (ChessRules.isInCheckFor(_game, playerColor)) {
         return 'Both ready. You are in check, move now.';
       }
       if (_aiMovePending) {
@@ -139,7 +140,7 @@ class LocalGameController extends ChangeNotifier {
     }
 
     if (playerReady) {
-      return _isInCheckFor(playerColor)
+      return ChessRules.isInCheckFor(_game, playerColor)
           ? 'You are in check. Move now.'
           : 'You can move now.';
     }
@@ -188,12 +189,16 @@ class LocalGameController extends ChangeNotifier {
 
     final pieces = boardPieces;
     final piece = pieces[square];
-    final isOwnPiece = piece != null && _pieceColor(piece) == playerColor;
+    final isOwnPiece = piece != null && ChessRules.pieceColor(piece) == playerColor;
 
     if (_selectedSquare == null) {
       if (isOwnPiece) {
         _selectedSquare = square;
-        _legalTargets = _legalDestinationsFrom(square, playerColor);
+        _legalTargets = ChessRules.legalDestinationsFrom(
+          game: _game,
+          square: square,
+          color: playerColor,
+        );
         _feedback = null;
         notifyListeners();
       }
@@ -207,7 +212,8 @@ class LocalGameController extends ChangeNotifier {
     }
 
     final from = _selectedSquare!;
-    final legalMove = _findValidatedLegalMove(
+    final legalMove = ChessRules.findValidatedLegalMove(
+      game: _game,
       from: from,
       to: square,
       color: playerColor,
@@ -259,7 +265,11 @@ class LocalGameController extends ChangeNotifier {
         return;
       }
       _selectedSquare = square;
-      _legalTargets = _legalDestinationsFrom(square, playerColor);
+      _legalTargets = ChessRules.legalDestinationsFrom(
+        game: _game,
+        square: square,
+        color: playerColor,
+      );
       _feedback = null;
       notifyListeners();
       return;
@@ -295,7 +305,7 @@ class LocalGameController extends ChangeNotifier {
         _aiMovePending ||
         isGameOver ||
         cooldownRemaining(aiColor).inMilliseconds > 0 ||
-        !_hasAnyLegalMove(aiColor)) {
+        !ChessRules.hasAnyLegalMove(_game, aiColor)) {
       return;
     }
 
@@ -311,13 +321,13 @@ class LocalGameController extends ChangeNotifier {
     if (!_hasActiveGame ||
         isGameOver ||
         cooldownRemaining(aiColor).inMilliseconds > 0 ||
-        !_hasAnyLegalMove(aiColor)) {
+        !ChessRules.hasAnyLegalMove(_game, aiColor)) {
       _aiMovePending = false;
       notifyListeners();
       return;
     }
 
-    final move = _withTurn(aiColor, () => _aiEngine.chooseMove(_game));
+    final move = ChessRules.withTurn(_game, aiColor, () => _aiEngine.chooseMove(_game));
     if (move != null) {
       _applyMove(
         from: move.from,
@@ -368,7 +378,8 @@ class LocalGameController extends ChangeNotifier {
       return false;
     }
 
-    final legalMove = _findValidatedLegalMove(
+    final legalMove = ChessRules.findValidatedLegalMove(
+      game: _game,
       from: from,
       to: to,
       color: moverColor,
@@ -379,7 +390,7 @@ class LocalGameController extends ChangeNotifier {
     }
 
     final previousTurn = _game.turn;
-    _game.turn = _toChessColor(moverColor);
+    _game.turn = ChessRules.toChessColor(moverColor);
     final moved = _game.move({'from': from, 'to': to, 'promotion': promotion});
 
     if (!moved) {
@@ -418,61 +429,6 @@ class LocalGameController extends ChangeNotifier {
     _whiteReadyAt = now;
   }
 
-  Set<String> _legalDestinationsFrom(String square, String color) {
-    final legalMoves = _withTurn(
-      color,
-      () => _game
-          .moves({'verbose': true})
-          .map((dynamic item) => Map<String, dynamic>.from(item as Map))
-          .toList(),
-    );
-
-    return legalMoves
-        .where((move) => move['from'] == square)
-        .map((move) => move['to'] as String)
-        .toSet();
-  }
-
-  bool _hasAnyLegalMove(String color) {
-    return _withTurn(color, () => _game.moves().isNotEmpty);
-  }
-
-  bool _isInCheckFor(String color) {
-    return _withTurn(color, () => _game.in_check);
-  }
-
-  Map<String, dynamic>? _findValidatedLegalMove({
-    required String from,
-    required String to,
-    required String color,
-    required String promotion,
-  }) {
-    return _withTurn(color, () {
-      final legalMoves = _game
-          .moves({'verbose': true})
-          .map((dynamic item) => Map<String, dynamic>.from(item as Map))
-          .where((move) => move['from'] == from && move['to'] == to)
-          .toList();
-
-      if (legalMoves.isEmpty) {
-        return null;
-      }
-
-      for (final move in legalMoves) {
-        if (move['promotion'] == promotion) {
-          return move;
-        }
-      }
-
-      for (final move in legalMoves) {
-        if (move['promotion'] == null) {
-          return move;
-        }
-      }
-      return null;
-    });
-  }
-
   void _clearSelection() {
     _selectedSquare = null;
     _legalTargets = <String>{};
@@ -505,7 +461,8 @@ class LocalGameController extends ChangeNotifier {
     final from = _queuedMoveFrom!;
     final to = _queuedMoveTo!;
     final promotion = _queuedPromotion;
-    final legalMove = _findValidatedLegalMove(
+    final legalMove = ChessRules.findValidatedLegalMove(
+      game: _game,
       from: from,
       to: to,
       color: playerColor,
@@ -540,12 +497,16 @@ class LocalGameController extends ChangeNotifier {
     }
 
     final piece = boardPieces[_selectedSquare!];
-    if (piece == null || _pieceColor(piece) != playerColor) {
+    if (piece == null || ChessRules.pieceColor(piece) != playerColor) {
       _clearSelection();
       return;
     }
 
-    _legalTargets = _legalDestinationsFrom(_selectedSquare!, playerColor);
+    _legalTargets = ChessRules.legalDestinationsFrom(
+      game: _game,
+      square: _selectedSquare!,
+      color: playerColor,
+    );
   }
 
   void _refreshTerminalState() {
@@ -553,7 +514,7 @@ class LocalGameController extends ChangeNotifier {
       _winnerColor = null;
       return;
     }
-    final winner = _detectCheckmateWinner();
+    final winner = ChessRules.detectCheckmateWinner(_game);
     _winnerColor = winner;
     if (_winnerColor != null) {
       _cancelAiTimer();
@@ -563,54 +524,9 @@ class LocalGameController extends ChangeNotifier {
     }
   }
 
-  String? _detectCheckmateWinner() {
-    final whiteIsCheckmated = _withTurn('w', () => _game.in_checkmate);
-    if (whiteIsCheckmated) {
-      return 'b';
-    }
-
-    final blackIsCheckmated = _withTurn('b', () => _game.in_checkmate);
-    if (blackIsCheckmated) {
-      return 'w';
-    }
-
-    return null;
-  }
-
   void _cancelAiTimer() {
     _aiMoveTimer?.cancel();
     _aiMoveTimer = null;
-  }
-
-  static String _colorCode(chess.Color color) {
-    return color == chess.Color.WHITE ? 'w' : 'b';
-  }
-
-  static chess.Color _toChessColor(String color) {
-    return color == 'w' ? chess.Color.WHITE : chess.Color.BLACK;
-  }
-
-  static String _otherColor(String color) {
-    return color == 'w' ? 'b' : 'w';
-  }
-
-  static String _pieceColor(String piece) {
-    return piece == piece.toUpperCase() ? 'w' : 'b';
-  }
-
-  static String _formatDuration(Duration duration) {
-    final seconds = duration.inMilliseconds / 1000.0;
-    return '${seconds.toStringAsFixed(1)}s';
-  }
-
-  T _withTurn<T>(String color, T Function() callback) {
-    final previousTurn = _game.turn;
-    _game.turn = _toChessColor(color);
-    try {
-      return callback();
-    } finally {
-      _game.turn = previousTurn;
-    }
   }
 
   Duration _nextAiThinkDelay() {
@@ -623,28 +539,4 @@ class LocalGameController extends ChangeNotifier {
     return Duration(milliseconds: minMs + delta);
   }
 
-  static Map<String, String> _boardPiecesFromFen(String fen) {
-    const files = 'abcdefgh';
-    final rows = fen.split(' ').first.split('/');
-    final board = <String, String>{};
-
-    for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
-      final row = rows[rowIndex];
-      var fileIndex = 0;
-
-      for (final symbol in row.split('')) {
-        final emptyCount = int.tryParse(symbol);
-        if (emptyCount != null) {
-          fileIndex += emptyCount;
-          continue;
-        }
-
-        final square = '${files[fileIndex]}${8 - rowIndex}';
-        board[square] = symbol;
-        fileIndex += 1;
-      }
-    }
-
-    return board;
-  }
 }

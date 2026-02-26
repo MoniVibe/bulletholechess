@@ -6,10 +6,12 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'chess_rules.dart';
+
 enum OnlineConnectionState { disconnected, connecting, connected }
 
 class OnlineGameController extends ChangeNotifier {
-  static const String _defaultPromotion = 'q';
+  static const String _defaultPromotion = ChessRules.defaultPromotion;
 
   OnlineGameController({
     Duration initialCooldownDuration = const Duration(seconds: 3),
@@ -68,7 +70,7 @@ class OnlineGameController extends ChangeNotifier {
   bool get isWaitingForOpponent => _status == 'waiting';
   bool get isMatchActive => _status == 'active';
   Duration get cooldownDuration => _cooldownDuration;
-  String get turnColor => _colorCode(_game.turn);
+  String get turnColor => ChessRules.colorCode(_game.turn);
   bool get isMyTurn => _myColor != null && _myColor == turnColor;
   bool get isGameOver => _result != null || _game.game_over;
   String? get resultCode => _result;
@@ -99,7 +101,7 @@ class OnlineGameController extends ChangeNotifier {
     if (!isConnected || _status != 'active' || color == null || isGameOver) {
       return false;
     }
-    return _hasAnyLegalMove(color);
+    return ChessRules.hasAnyLegalMove(_game, color);
   }
 
   String? get opponentLastMoveLabel {
@@ -110,7 +112,7 @@ class OnlineGameController extends ChangeNotifier {
   }
 
   String? get feedback => _feedback;
-  Map<String, String> get boardPieces => _boardPiecesFromFen(_game.fen);
+  Map<String, String> get boardPieces => ChessRules.boardPiecesFromFen(_game.fen);
   List<String> get history => _game.getHistory().cast<String>();
   String get playerColor => _myColor ?? 'w';
   String? get whitePlayerName => _whitePlayerName;
@@ -154,14 +156,14 @@ class OnlineGameController extends ChangeNotifier {
       return 'Waiting for color assignment...';
     }
 
-    if (_isInCheckFor(color)) {
+    if (ChessRules.isInCheckFor(_game, color)) {
       return 'Your king is in check. Play a legal response.';
     }
 
     if (hasQueuedMove) {
       final remaining = cooldownRemaining(color);
       if (remaining.inMilliseconds > 0) {
-        return 'Queued $queuedMoveLabel (${_formatDuration(remaining)}).';
+        return 'Queued $queuedMoveLabel (${ChessRules.formatDuration(remaining)}).';
       }
       return _moveInFlight
           ? 'Queued $queuedMoveLabel. Sending...'
@@ -174,7 +176,7 @@ class OnlineGameController extends ChangeNotifier {
 
     final myRemaining = cooldownRemaining(color);
     if (myRemaining.inMilliseconds > 0) {
-      return 'Cooling down (${_formatDuration(myRemaining)}).';
+      return 'Cooling down (${ChessRules.formatDuration(myRemaining)}).';
     }
 
     return 'You can move now.';
@@ -356,12 +358,16 @@ class OnlineGameController extends ChangeNotifier {
 
     final pieces = boardPieces;
     final piece = pieces[square];
-    final isOwnPiece = piece != null && _pieceColor(piece) == color;
+    final isOwnPiece = piece != null && ChessRules.pieceColor(piece) == color;
 
     if (_selectedSquare == null) {
       if (isOwnPiece) {
         _selectedSquare = square;
-        _legalTargets = _legalDestinationsFrom(square, color);
+        _legalTargets = ChessRules.legalDestinationsFrom(
+          game: _game,
+          square: square,
+          color: color,
+        );
         _feedback = null;
         notifyListeners();
       }
@@ -375,7 +381,8 @@ class OnlineGameController extends ChangeNotifier {
     }
 
     final from = _selectedSquare!;
-    final legalMove = _findValidatedLegalMove(
+    final legalMove = ChessRules.findValidatedLegalMove(
+      game: _game,
       from: from,
       to: square,
       color: color,
@@ -426,7 +433,11 @@ class OnlineGameController extends ChangeNotifier {
         return;
       }
       _selectedSquare = square;
-      _legalTargets = _legalDestinationsFrom(square, color);
+      _legalTargets = ChessRules.legalDestinationsFrom(
+        game: _game,
+        square: square,
+        color: color,
+      );
       _feedback = null;
       notifyListeners();
       return;
@@ -502,7 +513,8 @@ class OnlineGameController extends ChangeNotifier {
     final from = _queuedMoveFrom!;
     final to = _queuedMoveTo!;
     final promotion = _queuedPromotion;
-    final legalMove = _findValidatedLegalMove(
+    final legalMove = ChessRules.findValidatedLegalMove(
+      game: _game,
       from: from,
       to: to,
       color: color,
@@ -714,7 +726,7 @@ class OnlineGameController extends ChangeNotifier {
       _lastMoveFrom = lastMove['from'] as String?;
       _lastMoveTo = lastMove['to'] as String?;
       final turnAfterMove = state['turn'] as String? ?? turnColor;
-      final moverColor = _oppositeColor(turnAfterMove);
+      final moverColor = ChessRules.oppositeColor(turnAfterMove);
       _lastMoverColor = moverColor;
       if (_myColor != null && moverColor == _myColor) {
         _myLastMoveFrom = _lastMoveFrom;
@@ -762,67 +774,16 @@ class OnlineGameController extends ChangeNotifier {
     }
 
     final piece = boardPieces[_selectedSquare!];
-    if (piece == null || _pieceColor(piece) != color) {
+    if (piece == null || ChessRules.pieceColor(piece) != color) {
       _clearSelection();
       return;
     }
 
-    _legalTargets = _legalDestinationsFrom(_selectedSquare!, color);
-  }
-
-  Set<String> _legalDestinationsFrom(String square, String color) {
-    final legalMoves = _withTurn(
-      color,
-      () => _game
-          .moves(<String, dynamic>{'verbose': true})
-          .map((dynamic item) => Map<String, dynamic>.from(item as Map))
-          .toList(),
+    _legalTargets = ChessRules.legalDestinationsFrom(
+      game: _game,
+      square: _selectedSquare!,
+      color: color,
     );
-
-    return legalMoves
-        .where((move) => move['from'] == square)
-        .map((move) => move['to'] as String)
-        .toSet();
-  }
-
-  bool _hasAnyLegalMove(String color) {
-    return _withTurn(color, () => _game.moves().isNotEmpty);
-  }
-
-  bool _isInCheckFor(String color) {
-    return _withTurn(color, () => _game.in_check);
-  }
-
-  Map<String, dynamic>? _findValidatedLegalMove({
-    required String from,
-    required String to,
-    required String color,
-    required String promotion,
-  }) {
-    return _withTurn(color, () {
-      final legalMoves = _game
-          .moves(<String, dynamic>{'verbose': true})
-          .map((dynamic item) => Map<String, dynamic>.from(item as Map))
-          .where((move) => move['from'] == from && move['to'] == to)
-          .toList();
-
-      if (legalMoves.isEmpty) {
-        return null;
-      }
-
-      for (final move in legalMoves) {
-        if (move['promotion'] == promotion) {
-          return move;
-        }
-      }
-
-      for (final move in legalMoves) {
-        if (move['promotion'] == null) {
-          return move;
-        }
-      }
-      return null;
-    });
   }
 
   void _send(Map<String, dynamic> payload) {
@@ -838,16 +799,6 @@ class OnlineGameController extends ChangeNotifier {
       return true;
     }
     return message.toLowerCase().contains('cooldown');
-  }
-
-  T _withTurn<T>(String color, T Function() callback) {
-    final previousTurn = _game.turn;
-    _game.turn = _toChessColor(color);
-    try {
-      return callback();
-    } finally {
-      _game.turn = previousTurn;
-    }
   }
 
   static Uri _parseBaseUri(String raw) {
@@ -896,49 +847,4 @@ class OnlineGameController extends ChangeNotifier {
     return null;
   }
 
-  static String _pieceColor(String piece) {
-    return piece == piece.toUpperCase() ? 'w' : 'b';
-  }
-
-  static String _formatDuration(Duration duration) {
-    final seconds = duration.inMilliseconds / 1000.0;
-    return '${seconds.toStringAsFixed(1)}s';
-  }
-
-  static String _colorCode(chess.Color color) {
-    return color == chess.Color.WHITE ? 'w' : 'b';
-  }
-
-  static chess.Color _toChessColor(String color) {
-    return color == 'w' ? chess.Color.WHITE : chess.Color.BLACK;
-  }
-
-  static String _oppositeColor(String color) {
-    return color == 'w' ? 'b' : 'w';
-  }
-
-  static Map<String, String> _boardPiecesFromFen(String fen) {
-    const files = 'abcdefgh';
-    final rows = fen.split(' ').first.split('/');
-    final board = <String, String>{};
-
-    for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
-      final row = rows[rowIndex];
-      var fileIndex = 0;
-
-      for (final symbol in row.split('')) {
-        final emptyCount = int.tryParse(symbol);
-        if (emptyCount != null) {
-          fileIndex += emptyCount;
-          continue;
-        }
-
-        final square = '${files[fileIndex]}${8 - rowIndex}';
-        board[square] = symbol;
-        fileIndex += 1;
-      }
-    }
-
-    return board;
-  }
 }
