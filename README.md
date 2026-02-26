@@ -55,6 +55,38 @@ az containerapp create -n bullethole-backend -g <rg> \
 
 Container Apps handles TLS; the app upgrades automatically to `wss://` for game socket.
 
+## Azure CI/CD (Current Setup)
+
+This repo uses two GitHub Actions workflows:
+
+- `.github/workflows/azure-static-web-apps-brave-pond-03a16080f.yml`
+  - builds Flutter web (`flutter build web --release`)
+  - deploys `build/web` to Azure Static Web Apps
+  - triggers only when frontend files change
+- `.github/workflows/matchmaker-AutoDeployTrigger-ec9e000a-64af-40bb-850c-f7a973ad71e1.yml`
+  - deploys `multiplayer_node_server/` source to Azure Container Apps
+  - enforces single-instance scaling by default (`min=0`, `max=1`)
+  - triggers only when backend files change
+
+### Required GitHub repository secrets
+
+- `AZURE_STATIC_WEB_APPS_API_TOKEN_BRAVE_POND_03A16080F`
+- `MATCHMAKER_AZURE_CLIENT_ID`
+- `MATCHMAKER_AZURE_TENANT_ID`
+- `MATCHMAKER_AZURE_SUBSCRIPTION_ID`
+
+### Optional GitHub repository variables
+
+- `DEFAULT_BACKEND_URL`
+  - Example: `https://matchmaker.<region>.azurecontainerapps.io`
+  - Used at web build time so the app defaults to your deployed backend instead of localhost.
+- `MATCHMAKER_MIN_REPLICAS`
+  - Default: `0` (cheapest, allows scale-to-zero)
+- `MATCHMAKER_MAX_REPLICAS`
+  - Default: `1` (important for current in-memory match state)
+- `MATCH_TTL_MS`
+  - Optional backend env var for auto-expiring inactive matches
+
 ## Why this is seamless
 
 - one hosted URL for both matchmaking and gameplay

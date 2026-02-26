@@ -14,6 +14,10 @@ class OnlineGamePanel extends StatefulWidget {
 
 class _OnlineGamePanelState extends State<OnlineGamePanel> {
   static const List<int> _cooldownOptionsSeconds = [2, 3, 5, 7, 10];
+  static const String _defaultBackendUrl = String.fromEnvironment(
+    'DEFAULT_BACKEND_URL',
+    defaultValue: 'http://localhost:8080',
+  );
 
   late final OnlineGameController _controller;
   late final TextEditingController _apiBaseController;
@@ -27,7 +31,7 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
   void initState() {
     super.initState();
     _controller = OnlineGameController();
-    _apiBaseController = TextEditingController(text: 'http://localhost:8080');
+    _apiBaseController = TextEditingController(text: _defaultBackendUrl);
     _nameController = TextEditingController(text: 'Player');
   }
 

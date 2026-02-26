@@ -1,28 +1,24 @@
 name: Trigger auto deployment for matchmaker
 
-# When this action will be executed
 on:
-  # Automatically trigger it when detected changes in repo
   push:
-    branches: 
-      [ main ]
+    branches:
+      - main
     paths:
-    - '**'
-    - '.github/workflows/matchmaker-AutoDeployTrigger-ec9e000a-64af-40bb-850c-f7a973ad71e1.yml'
-
-  # Allow manual trigger 
-  workflow_dispatch:      
+      - "multiplayer_node_server/**"
+      - ".github/workflows/matchmaker-AutoDeployTrigger-ec9e000a-64af-40bb-850c-f7a973ad71e1.yml"
+  workflow_dispatch:
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    permissions: 
-      id-token: write #This is required for requesting the OIDC JWT Token
-      contents: read #Required when GH token is used to authenticate with private repo
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
-      - name: Checkout to the branch
-        uses: actions/checkout@v2
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Azure Login
         uses: azure/login@v2
@@ -31,19 +27,42 @@ jobs:
           tenant-id: ${{ secrets.MATCHMAKER_AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.MATCHMAKER_AZURE_SUBSCRIPTION_ID }}
 
-      - name: Build and push container image to registry
-        uses: azure/container-apps-deploy-action@v2
+      - name: Deploy source to Azure Container Apps
+        uses: azure/CLI@v2
+        env:
+          MATCHMAKER_MIN_REPLICAS: ${{ vars.MATCHMAKER_MIN_REPLICAS }}
+          MATCHMAKER_MAX_REPLICAS: ${{ vars.MATCHMAKER_MAX_REPLICAS }}
+          MATCH_TTL_MS: ${{ vars.MATCH_TTL_MS }}
         with:
-          appSourcePath: ${{ github.workspace }}
-          _dockerfilePathKey_: _dockerfilePath_
-          _targetLabelKey_: _targetLabel_
-          registryUrl: 
-          registryUsername: ${{ secrets.MATCHMAKER_REGISTRY_USERNAME }}
-          registryPassword: ${{ secrets.MATCHMAKER_REGISTRY_PASSWORD }}
-          containerAppName: matchmaker
-          resourceGroup: chess
-          imageToBuild: default/[parameters('containerAppName')]:${{ github.sha }}
-          _buildArgumentsKey_: |
-            _buildArgumentsValues_
+          inlineScript: |
+            set -euo pipefail
+
+            az extension add --name containerapp --upgrade --allow-preview true
+
+            az containerapp up \
+              --name matchmaker \
+              --resource-group chess \
+              --environment managedEnvironment-chess-a634 \
+              --source ./multiplayer_node_server \
+              --ingress external \
+              --target-port 8080
+
+            min_replicas="${MATCHMAKER_MIN_REPLICAS:-0}"
+            max_replicas="${MATCHMAKER_MAX_REPLICAS:-1}"
+
+            if [ -n "${MATCH_TTL_MS:-}" ]; then
+              az containerapp update \
+                --name matchmaker \
+                --resource-group chess \
+                --min-replicas "$min_replicas" \
+                --max-replicas "$max_replicas" \
+                --set-env-vars "MATCH_TTL_MS=${MATCH_TTL_MS}"
+            else
+              az containerapp update \
+                --name matchmaker \
+                --resource-group chess \
+                --min-replicas "$min_replicas" \
+                --max-replicas "$max_replicas"
+            fi
 
 
