@@ -9,14 +9,33 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 enum OnlineConnectionState { disconnected, connecting, connected }
 
 class OnlineGameController extends ChangeNotifier {
-  OnlineGameController();
+  OnlineGameController({
+    Duration initialCooldownDuration = const Duration(seconds: 3),
+  }) : _cooldownDuration = initialCooldownDuration {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    _whiteReadyAtMs = now;
+    _blackReadyAtMs = now;
+    _ticker = Timer.periodic(
+      const Duration(milliseconds: 200),
+      (_) => _onTick(),
+    );
+  }
 
+  final chess.Chess _game = chess.Chess();
+
+  late final Timer _ticker;
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
 
   OnlineConnectionState _connectionState = OnlineConnectionState.disconnected;
-  final chess.Chess _game = chess.Chess();
+  Duration _cooldownDuration;
   int _sequence = 0;
+  int _clockOffsetMs = 0;
+  int _whiteReadyAtMs = 0;
+  int _blackReadyAtMs = 0;
+  bool _disposed = false;
+  bool _moveInFlight = false;
+
   String? _selectedSquare;
   Set<String> _legalTargets = <String>{};
   String? _myLastMoveFrom;
@@ -32,16 +51,21 @@ class OnlineGameController extends ChangeNotifier {
   String _status = 'disconnected';
   String? _whitePlayerName;
   String? _blackPlayerName;
-  bool _moveInFlight = false;
   String? _result;
+
+  String? _queuedMoveFrom;
+  String? _queuedMoveTo;
+  String _queuedPromotion = 'q';
 
   OnlineConnectionState get connectionState => _connectionState;
   bool get isConnected => _connectionState == OnlineConnectionState.connected;
   String? get roomId => _matchId;
   String? get matchId => _matchId;
   String? get myColor => _myColor;
+  bool get hasActiveGame => _status == 'active';
   bool get isWaitingForOpponent => _status == 'waiting';
   bool get isMatchActive => _status == 'active';
+  Duration get cooldownDuration => _cooldownDuration;
   String get turnColor => _colorCode(_game.turn);
   bool get isMyTurn => _myColor != null && _myColor == turnColor;
   bool get isGameOver => _result != null || _game.game_over;
@@ -58,6 +82,24 @@ class OnlineGameController extends ChangeNotifier {
       _lastMoverColor != null &&
       _myColor != null &&
       _lastMoverColor != _myColor;
+  bool get hasQueuedMove => _queuedMoveFrom != null && _queuedMoveTo != null;
+  String? get queuedMoveFrom => _queuedMoveFrom;
+  String? get queuedMoveTo => _queuedMoveTo;
+  String? get queuedMoveLabel {
+    if (!hasQueuedMove) {
+      return null;
+    }
+    return '$_queuedMoveFrom-$_queuedMoveTo';
+  }
+
+  bool get canPlayerInteract {
+    final color = _myColor;
+    if (!isConnected || _status != 'active' || color == null || isGameOver) {
+      return false;
+    }
+    return !_isInCheckFor(color) && _hasAnyLegalMove(color);
+  }
+
   String? get opponentLastMoveLabel {
     if (_opponentLastMoveFrom == null || _opponentLastMoveTo == null) {
       return null;
@@ -105,23 +147,60 @@ class OnlineGameController extends ChangeNotifier {
       return 'Game over. Start a new game/rematch.';
     }
 
+    final color = _myColor;
+    if (color == null) {
+      return 'Waiting for color assignment...';
+    }
+
+    if (_isInCheckFor(color)) {
+      return 'Your king is in check. Moves and queued moves are locked.';
+    }
+
+    if (hasQueuedMove) {
+      final remaining = cooldownRemaining(color);
+      if (remaining.inMilliseconds > 0) {
+        return 'Queued $queuedMoveLabel (${_formatDuration(remaining)}).';
+      }
+      return _moveInFlight
+          ? 'Queued $queuedMoveLabel. Sending...'
+          : 'Queued $queuedMoveLabel. Executing...';
+    }
+
     if (_moveInFlight) {
       return 'Move sent. Waiting for server...';
     }
 
-    if (isMyTurn) {
-      if (_game.in_check) {
-        return 'Your turn. You are in check.';
-      }
-      return 'Your turn.';
+    final myRemaining = cooldownRemaining(color);
+    if (myRemaining.inMilliseconds > 0) {
+      return 'Cooling down (${_formatDuration(myRemaining)}).';
     }
 
-    return 'Opponent turn.';
+    return 'You can move now.';
+  }
+
+  Duration cooldownRemaining(String color) {
+    final now = _estimatedServerNowMs();
+    final readyAt = color == 'w' ? _whiteReadyAtMs : _blackReadyAtMs;
+    final remaining = readyAt - now;
+    if (remaining <= 0) {
+      return Duration.zero;
+    }
+    return Duration(milliseconds: remaining);
+  }
+
+  void clearQueuedMove() {
+    if (!hasQueuedMove) {
+      return;
+    }
+    _clearQueuedMove();
+    _feedback = 'Queued move cleared';
+    notifyListeners();
   }
 
   Future<void> findMatch({
     required String apiBaseUrl,
     required String displayName,
+    int? cooldownSeconds,
   }) async {
     final normalizedName = displayName.trim();
     if (normalizedName.isEmpty) {
@@ -132,14 +211,22 @@ class OnlineGameController extends ChangeNotifier {
 
     _connectionState = OnlineConnectionState.connecting;
     _feedback = null;
+    if (cooldownSeconds != null && cooldownSeconds > 0) {
+      _cooldownDuration = Duration(seconds: cooldownSeconds);
+    }
     notifyListeners();
 
     try {
       final baseUri = _parseBaseUri(apiBaseUrl);
+      final payload = <String, dynamic>{'name': normalizedName};
+      if (cooldownSeconds != null) {
+        payload['cooldownSeconds'] = cooldownSeconds;
+      }
+
       final response = await http.post(
         baseUri.resolve('/api/matches/join'),
         headers: const {'content-type': 'application/json'},
-        body: jsonEncode(<String, dynamic>{'name': normalizedName}),
+        body: jsonEncode(payload),
       );
 
       final body = _decodeResponseMap(response.body);
@@ -152,6 +239,11 @@ class OnlineGameController extends ChangeNotifier {
       final matchId = body['matchId'] as String?;
       final playerId = body['playerId'] as String?;
       final wsPath = body['wsPath'] as String? ?? '/ws';
+      final responseCooldown = _readInt(body['cooldownSeconds']);
+      if (responseCooldown != null && responseCooldown > 0) {
+        _cooldownDuration = Duration(seconds: responseCooldown);
+      }
+
       if (matchId == null || playerId == null) {
         throw Exception('Invalid match response from server.');
       }
@@ -224,6 +316,7 @@ class OnlineGameController extends ChangeNotifier {
   Future<void> disconnect({bool notify = true}) async {
     _moveInFlight = false;
     _clearSelection();
+    _clearQueuedMove();
     await _subscription?.cancel();
     _subscription = null;
     await _channel?.sink.close();
@@ -243,6 +336,10 @@ class OnlineGameController extends ChangeNotifier {
     _blackPlayerName = null;
     _result = null;
     _sequence = 0;
+    _clockOffsetMs = 0;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    _whiteReadyAtMs = now;
+    _blackReadyAtMs = now;
     _feedback = null;
     if (notify) {
       notifyListeners();
@@ -250,18 +347,23 @@ class OnlineGameController extends ChangeNotifier {
   }
 
   void tapSquare(String square) {
-    if (!isConnected || _status != 'active' || isGameOver || !isMyTurn) {
+    final color = _myColor;
+    if (color == null || !canPlayerInteract || isGameOver) {
+      if (color != null && _isInCheckFor(color) && !isGameOver) {
+        _feedback = 'Cannot move while your king is in check.';
+        notifyListeners();
+      }
       return;
     }
 
     final pieces = boardPieces;
     final piece = pieces[square];
-    final ownPiece = piece != null && _pieceColor(piece) == (_myColor ?? '');
+    final isOwnPiece = piece != null && _pieceColor(piece) == color;
 
     if (_selectedSquare == null) {
-      if (ownPiece) {
+      if (isOwnPiece) {
         _selectedSquare = square;
-        _legalTargets = _legalDestinationsFrom(square);
+        _legalTargets = _legalDestinationsFrom(square, color);
         _feedback = null;
         notifyListeners();
       }
@@ -275,23 +377,46 @@ class OnlineGameController extends ChangeNotifier {
     }
 
     final from = _selectedSquare!;
-    if (_isMoveLegal(from: from, to: square, promotion: 'q')) {
-      _send(<String, dynamic>{
-        'type': 'move',
-        'from': from,
-        'to': square,
-        'promotion': 'q',
-      });
-      _moveInFlight = true;
-      _clearSelection();
-      _feedback = null;
-      notifyListeners();
+    final legalMove = _findValidatedLegalMove(
+      from: from,
+      to: square,
+      color: color,
+      promotion: 'q',
+    );
+    final legalNow = legalMove != null;
+
+    if (legalNow) {
+      final onCooldown = cooldownRemaining(color).inMilliseconds > 0;
+      if (onCooldown) {
+        _queuePlayerMove(from: from, to: square, promotion: 'q');
+        _clearSelection();
+        _feedback = null;
+        notifyListeners();
+        return;
+      }
+
+      final sent = _sendMove(from: from, to: square, promotion: 'q');
+      if (sent) {
+        _clearQueuedMove();
+        _clearSelection();
+        _feedback = null;
+        notifyListeners();
+      }
       return;
     }
 
-    if (ownPiece) {
+    if (isOwnPiece) {
+      final onCooldown = cooldownRemaining(color).inMilliseconds > 0;
+      if (onCooldown && _selectedSquare != square) {
+        _queuePlayerMove(from: from, to: square, promotion: 'q');
+        _clearSelection();
+        _feedback = null;
+        notifyListeners();
+        return;
+      }
       _selectedSquare = square;
-      _legalTargets = _legalDestinationsFrom(square);
+      _legalTargets = _legalDestinationsFrom(square, color);
+      _feedback = null;
       notifyListeners();
       return;
     }
@@ -300,17 +425,109 @@ class OnlineGameController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void requestNewGame() {
+  void requestNewGame({int? cooldownSeconds}) {
     if (!isConnected) {
       return;
     }
-    _send(<String, dynamic>{'type': 'new_game'});
+    final payload = <String, dynamic>{'type': 'new_game'};
+    if (cooldownSeconds != null) {
+      payload['cooldownSeconds'] = cooldownSeconds;
+      _cooldownDuration = Duration(seconds: cooldownSeconds);
+    }
+    _send(payload);
+    notifyListeners();
   }
 
   @override
   void dispose() {
+    _disposed = true;
+    _ticker.cancel();
     disconnect(notify: false);
     super.dispose();
+  }
+
+  void _onTick() {
+    if (_disposed || !isConnected) {
+      return;
+    }
+
+    if (_status == 'active') {
+      _tryExecuteQueuedPlayerMove();
+    }
+
+    if (_status == 'active' || hasQueuedMove) {
+      notifyListeners();
+    }
+  }
+
+  bool _sendMove({
+    required String from,
+    required String to,
+    required String promotion,
+  }) {
+    if (!isConnected || _status != 'active' || _moveInFlight) {
+      return false;
+    }
+
+    _send(<String, dynamic>{
+      'type': 'move',
+      'from': from,
+      'to': to,
+      'promotion': promotion,
+    });
+    _moveInFlight = true;
+    return true;
+  }
+
+  void _tryExecuteQueuedPlayerMove() {
+    final color = _myColor;
+    if (color == null || !hasQueuedMove || isGameOver || _moveInFlight) {
+      return;
+    }
+    if (_isInCheckFor(color)) {
+      _clearQueuedMove();
+      _feedback = 'Queued move canceled: your king is in check.';
+      return;
+    }
+    if (cooldownRemaining(color).inMilliseconds > 0) {
+      return;
+    }
+
+    final from = _queuedMoveFrom!;
+    final to = _queuedMoveTo!;
+    final promotion = _queuedPromotion;
+    final legalMove = _findValidatedLegalMove(
+      from: from,
+      to: to,
+      color: color,
+      promotion: promotion,
+    );
+    if (legalMove == null) {
+      _clearQueuedMove();
+      _feedback = null;
+      return;
+    }
+
+    final sent = _sendMove(from: from, to: to, promotion: promotion);
+    if (sent) {
+      _feedback = null;
+    }
+  }
+
+  void _queuePlayerMove({
+    required String from,
+    required String to,
+    required String promotion,
+  }) {
+    _queuedMoveFrom = from;
+    _queuedMoveTo = to;
+    _queuedPromotion = promotion;
+  }
+
+  void _clearQueuedMove() {
+    _queuedMoveFrom = null;
+    _queuedMoveTo = null;
+    _queuedPromotion = 'q';
   }
 
   Future<void> _connectWebSocket({
@@ -380,6 +597,16 @@ class OnlineGameController extends ChangeNotifier {
         _connectionState = OnlineConnectionState.connected;
         _matchId = map['matchId'] as String? ?? _matchId;
         _myColor = map['color'] as String?;
+
+        final welcomeCooldown = _readInt(map['cooldownSeconds']);
+        if (welcomeCooldown != null && welcomeCooldown > 0) {
+          _cooldownDuration = Duration(seconds: welcomeCooldown);
+        }
+        final serverNow = _readInt(map['serverNow']);
+        if (serverNow != null) {
+          _clockOffsetMs = serverNow - DateTime.now().millisecondsSinceEpoch;
+        }
+
         _feedback = null;
         notifyListeners();
         return;
@@ -392,7 +619,29 @@ class OnlineGameController extends ChangeNotifier {
         return;
       case 'error':
         _moveInFlight = false;
-        _feedback = map['message'] as String? ?? 'Server error';
+        final errorCode = map['code'] as String?;
+        final message = map['message'] as String? ?? 'Server error';
+        _feedback = message;
+        final serverNow = _readInt(map['serverNow']);
+        if (serverNow != null) {
+          _clockOffsetMs = serverNow - DateTime.now().millisecondsSinceEpoch;
+        }
+
+        final cooldownEndsAt = map['cooldownEndsAt'];
+        if (cooldownEndsAt is Map) {
+          final w = _readInt(cooldownEndsAt['w']);
+          final b = _readInt(cooldownEndsAt['b']);
+          if (w != null) {
+            _whiteReadyAtMs = w;
+          }
+          if (b != null) {
+            _blackReadyAtMs = b;
+          }
+        }
+
+        if (hasQueuedMove && !_isRetriableQueueError(errorCode, message)) {
+          _clearQueuedMove();
+        }
         notifyListeners();
         return;
       case 'pong':
@@ -408,6 +657,34 @@ class OnlineGameController extends ChangeNotifier {
       return;
     }
     _sequence = nextSequence;
+
+    final serverNow = _readInt(state['serverNow']);
+    if (serverNow != null) {
+      _clockOffsetMs = serverNow - DateTime.now().millisecondsSinceEpoch;
+    }
+
+    final cooldownSeconds = _readInt(state['cooldownSeconds']);
+    if (cooldownSeconds != null && cooldownSeconds > 0) {
+      _cooldownDuration = Duration(seconds: cooldownSeconds);
+    }
+    final cooldownMs = _readInt(state['cooldownMs']);
+    if ((cooldownSeconds == null || cooldownSeconds <= 0) &&
+        cooldownMs != null &&
+        cooldownMs > 0) {
+      _cooldownDuration = Duration(milliseconds: cooldownMs);
+    }
+
+    final cooldownEndsAt = state['cooldownEndsAt'];
+    if (cooldownEndsAt is Map) {
+      final w = _readInt(cooldownEndsAt['w']);
+      final b = _readInt(cooldownEndsAt['b']);
+      if (w != null) {
+        _whiteReadyAtMs = w;
+      }
+      if (b != null) {
+        _blackReadyAtMs = b;
+      }
+    }
 
     final fen = state['fen'] as String?;
     if (fen != null) {
@@ -440,6 +717,14 @@ class OnlineGameController extends ChangeNotifier {
         _opponentLastMoveFrom = _lastMoveFrom;
         _opponentLastMoveTo = _lastMoveTo;
       }
+
+      if (hasQueuedMove &&
+          _myColor != null &&
+          moverColor == _myColor &&
+          _queuedMoveFrom == _lastMoveFrom &&
+          _queuedMoveTo == _lastMoveTo) {
+        _clearQueuedMove();
+      }
     } else {
       final history = state['history'];
       if (history is List && history.isEmpty) {
@@ -450,7 +735,14 @@ class OnlineGameController extends ChangeNotifier {
         _lastMoveFrom = null;
         _lastMoveTo = null;
         _lastMoverColor = null;
+        _clearQueuedMove();
       }
+    }
+
+    final color = _myColor;
+    if (color != null && hasQueuedMove && _isInCheckFor(color)) {
+      _clearQueuedMove();
+      _feedback = 'Queued move canceled: your king is in check.';
     }
 
     _moveInFlight = false;
@@ -464,51 +756,242 @@ class OnlineGameController extends ChangeNotifier {
   }
 
   void _refreshSelectionForCurrentBoard() {
-    if (_selectedSquare == null || _myColor == null) {
+    final color = _myColor;
+    if (_selectedSquare == null || color == null) {
       return;
     }
 
     final piece = boardPieces[_selectedSquare!];
-    if (piece == null || _pieceColor(piece) != _myColor) {
+    if (piece == null || _pieceColor(piece) != color) {
       _clearSelection();
       return;
     }
 
-    _legalTargets = _legalDestinationsFrom(_selectedSquare!);
+    _legalTargets = _legalDestinationsFrom(_selectedSquare!, color);
   }
 
-  Set<String> _legalDestinationsFrom(String square) {
-    return _game
-        .moves(<String, dynamic>{'verbose': true})
-        .map((dynamic item) => Map<String, dynamic>.from(item as Map))
+  Set<String> _legalDestinationsFrom(String square, String color) {
+    final legalMoves = _withTurn(
+      color,
+      () => _game
+          .moves(<String, dynamic>{'verbose': true})
+          .map((dynamic item) => Map<String, dynamic>.from(item as Map))
+          .toList(),
+    );
+
+    return legalMoves
         .where((move) => move['from'] == square)
         .map((move) => move['to'] as String)
         .toSet();
   }
 
-  bool _isMoveLegal({
+  bool _hasAnyLegalMove(String color) {
+    return _withTurn(color, () => _game.moves().isNotEmpty);
+  }
+
+  bool _isInCheckFor(String color) {
+    return _withTurn(color, () => _game.in_check);
+  }
+
+  Map<String, dynamic>? _findValidatedLegalMove({
     required String from,
     required String to,
+    required String color,
     required String promotion,
   }) {
-    final legalMoves = _game
-        .moves(<String, dynamic>{'verbose': true})
-        .map((dynamic item) => Map<String, dynamic>.from(item as Map));
+    return _withTurn(color, () {
+      final legalMoves = _game
+          .moves(<String, dynamic>{'verbose': true})
+          .map((dynamic item) => Map<String, dynamic>.from(item as Map))
+          .toList();
 
-    return legalMoves.any((move) {
-      if (move['from'] != from || move['to'] != to) {
+      for (final move in legalMoves) {
+        if (move['from'] != from || move['to'] != to) {
+          continue;
+        }
+        final movePromotion = move['promotion'] as String?;
+        if (movePromotion == null) {
+          if (_passesSpecialMoveValidation(move: move, moverColor: color)) {
+            return move;
+          }
+          return null;
+        }
+        if (movePromotion == promotion &&
+            _passesSpecialMoveValidation(move: move, moverColor: color)) {
+          return move;
+        }
+      }
+
+      return null;
+    });
+  }
+
+  bool _passesSpecialMoveValidation({
+    required Map<String, dynamic> move,
+    required String moverColor,
+  }) {
+    return _isEnPassantStructurallyValid(move: move, moverColor: moverColor) &&
+        _isCastlingStructurallyValid(move: move, moverColor: moverColor);
+  }
+
+  bool _isEnPassantStructurallyValid({
+    required Map<String, dynamic> move,
+    required String moverColor,
+  }) {
+    final flags = move['flags'] as String? ?? '';
+    if (!flags.contains('e')) {
+      return true;
+    }
+
+    final from = move['from'] as String?;
+    final to = move['to'] as String?;
+    if (from == null || to == null) {
+      return false;
+    }
+
+    final fromFile = from.codeUnitAt(0);
+    final toFile = to.codeUnitAt(0);
+    final fromRank = int.tryParse(from[1]);
+    final toRank = int.tryParse(to[1]);
+    if (fromRank == null || toRank == null) {
+      return false;
+    }
+    if ((fromFile - toFile).abs() != 1) {
+      return false;
+    }
+
+    if (moverColor == 'w') {
+      if (fromRank != 5 || toRank != 6) {
         return false;
       }
-      final movePromotion = move['promotion'] as String?;
-      if (movePromotion == null) {
-        return true;
+    } else {
+      if (fromRank != 4 || toRank != 3) {
+        return false;
       }
-      return movePromotion == promotion;
-    });
+    }
+
+    final fenTokens = _game.fen.split(' ');
+    if (fenTokens.length < 4 || fenTokens[3] != to) {
+      return false;
+    }
+
+    final capturedRank = moverColor == 'w' ? toRank - 1 : toRank + 1;
+    final capturedSquare = '${to[0]}$capturedRank';
+    final capturedPiece = boardPieces[capturedSquare];
+    if (capturedPiece == null || capturedPiece.toLowerCase() != 'p') {
+      return false;
+    }
+    if (_pieceColor(capturedPiece) == moverColor) {
+      return false;
+    }
+
+    return true;
+  }
+
+  bool _isCastlingStructurallyValid({
+    required Map<String, dynamic> move,
+    required String moverColor,
+  }) {
+    final flags = move['flags'] as String? ?? '';
+    final kingSide = flags.contains('k');
+    final queenSide = flags.contains('q');
+    if (!kingSide && !queenSide) {
+      return true;
+    }
+
+    final from = move['from'] as String?;
+    final to = move['to'] as String?;
+    if (from == null || to == null) {
+      return false;
+    }
+
+    final isWhite = moverColor == 'w';
+    final expectedFrom = isWhite ? 'e1' : 'e8';
+    if (from != expectedFrom) {
+      return false;
+    }
+
+    final expectedTo = kingSide
+        ? (isWhite ? 'g1' : 'g8')
+        : (isWhite ? 'c1' : 'c8');
+    if (to != expectedTo) {
+      return false;
+    }
+
+    final pieces = boardPieces;
+    final kingPiece = pieces[expectedFrom];
+    if (kingPiece == null ||
+        kingPiece.toLowerCase() != 'k' ||
+        _pieceColor(kingPiece) != moverColor) {
+      return false;
+    }
+
+    final rookSquare = kingSide
+        ? (isWhite ? 'h1' : 'h8')
+        : (isWhite ? 'a1' : 'a8');
+    final rookPiece = pieces[rookSquare];
+    if (rookPiece == null ||
+        rookPiece.toLowerCase() != 'r' ||
+        _pieceColor(rookPiece) != moverColor) {
+      return false;
+    }
+
+    final mustBeEmpty = kingSide
+        ? (isWhite ? const ['f1', 'g1'] : const ['f8', 'g8'])
+        : (isWhite ? const ['d1', 'c1', 'b1'] : const ['d8', 'c8', 'b8']);
+    for (final square in mustBeEmpty) {
+      if (pieces[square] != null) {
+        return false;
+      }
+    }
+
+    final enemyColor = isWhite ? chess.Color.BLACK : chess.Color.WHITE;
+    final kingPathSquares = kingSide
+        ? (isWhite ? const ['e1', 'f1', 'g1'] : const ['e8', 'f8', 'g8'])
+        : (isWhite ? const ['e1', 'd1', 'c1'] : const ['e8', 'd8', 'c8']);
+    for (final square in kingPathSquares) {
+      if (_isSquareThreatenedBy(square: square, byColor: enemyColor)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  bool _isSquareThreatenedBy({
+    required String square,
+    required chess.Color byColor,
+  }) {
+    final index = chess.Chess.SQUARES[square];
+    if (index is! int) {
+      return false;
+    }
+    return _game.attacked(byColor, index);
   }
 
   void _send(Map<String, dynamic> payload) {
     _channel?.sink.add(jsonEncode(payload));
+  }
+
+  int _estimatedServerNowMs() {
+    return DateTime.now().millisecondsSinceEpoch + _clockOffsetMs;
+  }
+
+  bool _isRetriableQueueError(String? code, String message) {
+    if (code == 'cooldown_active') {
+      return true;
+    }
+    return message.toLowerCase().contains('cooldown');
+  }
+
+  T _withTurn<T>(String color, T Function() callback) {
+    final previousTurn = _game.turn;
+    _game.turn = _toChessColor(color);
+    try {
+      return callback();
+    } finally {
+      _game.turn = previousTurn;
+    }
   }
 
   static Uri _parseBaseUri(String raw) {
@@ -544,12 +1027,34 @@ class OnlineGameController extends ChangeNotifier {
     );
   }
 
+  static int? _readInt(dynamic value) {
+    if (value is int) {
+      return value;
+    }
+    if (value is num) {
+      return value.toInt();
+    }
+    if (value is String) {
+      return int.tryParse(value);
+    }
+    return null;
+  }
+
   static String _pieceColor(String piece) {
     return piece == piece.toUpperCase() ? 'w' : 'b';
   }
 
+  static String _formatDuration(Duration duration) {
+    final seconds = duration.inMilliseconds / 1000.0;
+    return '${seconds.toStringAsFixed(1)}s';
+  }
+
   static String _colorCode(chess.Color color) {
     return color == chess.Color.WHITE ? 'w' : 'b';
+  }
+
+  static chess.Color _toChessColor(String color) {
+    return color == 'w' ? chess.Color.WHITE : chess.Color.BLACK;
   }
 
   static String _oppositeColor(String color) {

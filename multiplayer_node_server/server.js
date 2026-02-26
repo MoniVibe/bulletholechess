@@ -8,6 +8,12 @@ const { WebSocketServer } = require('ws');
 
 const PORT = Number.parseInt(process.env.PORT || '8080', 10);
 const BIND = process.env.BIND || '0.0.0.0';
+const DEFAULT_COOLDOWN_SECONDS = Number.parseInt(
+  process.env.DEFAULT_COOLDOWN_SECONDS || '3',
+  10,
+);
+const MIN_COOLDOWN_SECONDS = 1;
+const MAX_COOLDOWN_SECONDS = 30;
 const MATCH_TTL_MS = Number.parseInt(process.env.MATCH_TTL_MS || '0', 10);
 const MATCH_TIMEOUT_ENABLED =
   Number.isFinite(MATCH_TTL_MS) && MATCH_TTL_MS > 0;
@@ -85,6 +91,8 @@ wss.on('connection', (socket, req) => {
     matchId,
     playerId,
     color,
+    cooldownSeconds: Math.round(match.cooldownMs / 1000),
+    serverNow: Date.now(),
   });
   broadcastState(match);
 
@@ -114,7 +122,10 @@ wss.on('connection', (socket, req) => {
     match.playersById.delete(playerId);
     clearColorSlot(match, color);
     match.game = new Chess();
-    match.updatedAt = Date.now();
+    const now = Date.now();
+    match.cooldownEndsAt.w = now;
+    match.cooldownEndsAt.b = now;
+    match.updatedAt = now;
 
     if (!match.players.white && !match.players.black) {
       cleanupMatch(matchId);
@@ -146,18 +157,23 @@ function joinOrCreate(req, res) {
     return;
   }
 
+  const requestedCooldownSeconds = sanitizeCooldownSeconds(
+    req.body?.cooldownSeconds,
+  );
+
   pruneExpiredMatches();
-  const assignment = assignPlayerToMatch(name);
+  const assignment = assignPlayerToMatch(name, requestedCooldownSeconds);
   const status = assignment.created ? 201 : 200;
   res.status(status).json({
     matchId: assignment.match.matchId,
     playerId: assignment.playerId,
     color: assignment.color,
     wsPath: '/ws',
+    cooldownSeconds: Math.round(assignment.match.cooldownMs / 1000),
   });
 }
 
-function assignPlayerToMatch(name) {
+function assignPlayerToMatch(name, requestedCooldownSeconds) {
   const waitingMatch = findJoinableMatch();
   if (waitingMatch) {
     const color = openColorForMatch(waitingMatch);
@@ -174,9 +190,15 @@ function assignPlayerToMatch(name) {
     };
   }
 
+  const cooldownSeconds =
+    requestedCooldownSeconds ??
+    sanitizeCooldownSeconds(DEFAULT_COOLDOWN_SECONDS) ??
+    3;
+  const cooldownMs = Math.max(cooldownSeconds * 1000, 0);
+
   const matchId = crypto.randomUUID();
   const playerId = crypto.randomUUID();
-  const match = createEmptyMatch({ matchId });
+  const match = createEmptyMatch({ matchId, cooldownMs });
   match.players.white = { playerId, name, socket: null };
   match.playersById.set(playerId, 'w');
   matches.set(matchId, match);
@@ -237,20 +259,48 @@ function clearColorSlot(match, color) {
 function handleSocketMessage({ match, color, socket, payload }) {
   const type = typeof payload.type === 'string' ? payload.type : '';
   switch (type) {
-    case 'move':
+    case 'move': {
       if (!match.players.white || !match.players.black) {
         sendJson(socket, { type: 'error', message: 'Waiting for opponent.' });
         return;
       }
-      if (match.game.isGameOver()) {
+
+      const terminal = getTerminalStatus(match.game);
+      if (terminal.gameOver) {
         sendJson(socket, {
           type: 'error',
           message: 'Game over. Start a new game.',
         });
         return;
       }
-      if (match.game.turn() !== color) {
-        sendJson(socket, { type: 'error', message: 'Not your turn.' });
+
+      if (isInCheckForColor(match.game, color)) {
+        sendJson(socket, {
+          type: 'error',
+          message: 'Your king is in check. Moves and queued moves are locked.',
+        });
+        return;
+      }
+
+      const now = Date.now();
+      const readyAt = match.cooldownEndsAt[color] || 0;
+      if (now < readyAt) {
+        sendJson(socket, {
+          type: 'error',
+          message: `Cooldown active for ${readyAt - now}ms.`,
+          code: 'cooldown_active',
+          remainingMs: readyAt - now,
+          serverNow: now,
+          cooldownEndsAt: match.cooldownEndsAt,
+        });
+        return;
+      }
+
+      if (!hasAnyLegalMoveForColor(match.game, color)) {
+        sendJson(socket, {
+          type: 'error',
+          message: 'No legal moves available.',
+        });
         return;
       }
 
@@ -265,24 +315,49 @@ function handleSocketMessage({ match, color, socket, payload }) {
         return;
       }
 
-      const moved = match.game.move({ from, to, promotion });
+      const legalMove = findValidatedLegalMove({
+        game: match.game,
+        from,
+        to,
+        promotion,
+        color,
+      });
+      if (!legalMove) {
+        sendJson(socket, { type: 'error', message: 'Illegal move.' });
+        return;
+      }
+
+      const moved = withColorTurn(match.game, color, () =>
+        match.game.move({ from, to, promotion }),
+      );
       if (!moved) {
         sendJson(socket, { type: 'error', message: 'Illegal move.' });
         return;
       }
 
-      match.updatedAt = Date.now();
+      setCooldownForMover(match, color, now);
+      match.updatedAt = now;
       broadcastState(match, {
         from,
         to,
         promotion,
       });
       return;
-    case 'new_game':
+    }
+    case 'new_game': {
+      const requestedCooldown = sanitizeCooldownSeconds(payload.cooldownSeconds);
+      if (requestedCooldown != null) {
+        match.cooldownMs = requestedCooldown * 1000;
+      }
+
       match.game = new Chess();
-      match.updatedAt = Date.now();
+      const now = Date.now();
+      match.cooldownEndsAt.w = now;
+      match.cooldownEndsAt.b = now;
+      match.updatedAt = now;
       broadcastState(match);
       return;
+    }
     case 'ping':
       sendJson(socket, { type: 'pong', at: new Date().toISOString() });
       return;
@@ -294,7 +369,8 @@ function handleSocketMessage({ match, color, socket, payload }) {
   }
 }
 
-function createEmptyMatch({ matchId }) {
+function createEmptyMatch({ matchId, cooldownMs }) {
+  const now = Date.now();
   return {
     matchId,
     players: {
@@ -304,18 +380,26 @@ function createEmptyMatch({ matchId }) {
     playersById: new Map(),
     game: new Chess(),
     sequence: 0,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    cooldownMs,
+    cooldownEndsAt: { w: now, b: now },
+    createdAt: now,
+    updatedAt: now,
   };
 }
 
 function broadcastState(match, lastMove = null) {
   match.sequence += 1;
+
+  const terminal = getTerminalStatus(match.game);
   const payload = {
     type: 'state',
     sequence: match.sequence,
     matchId: match.matchId,
-    status: match.players.white && match.players.black ? 'active' : 'waiting',
+    status: !match.players.white || !match.players.black
+      ? 'waiting'
+      : terminal.gameOver
+      ? 'game_over'
+      : 'active',
     fen: match.game.fen(),
     turn: match.game.turn(),
     history: match.game.history(),
@@ -323,13 +407,17 @@ function broadcastState(match, lastMove = null) {
       w: match.players.white ? match.players.white.name : null,
       b: match.players.black ? match.players.black.name : null,
     },
+    cooldownMs: match.cooldownMs,
+    cooldownSeconds: Math.round(match.cooldownMs / 1000),
+    cooldownEndsAt: match.cooldownEndsAt,
+    serverNow: Date.now(),
   };
 
   if (lastMove) {
     payload.lastMove = lastMove;
   }
-  if (match.game.isGameOver()) {
-    payload.result = gameResult(match.game);
+  if (terminal.gameOver && terminal.result) {
+    payload.result = terminal.result;
   }
 
   broadcastToConnected(match, payload);
@@ -385,16 +473,68 @@ function pruneExpiredMatches() {
   }
 }
 
-function gameResult(game) {
-  if (game.isCheckmate()) {
-    return game.turn() === 'w'
-      ? 'black_wins_checkmate'
-      : 'white_wins_checkmate';
+function setCooldownForMover(match, moverColor, atMs) {
+  const nextReady = atMs + match.cooldownMs;
+  if (moverColor === 'w') {
+    match.cooldownEndsAt.w = nextReady;
+    match.cooldownEndsAt.b = atMs;
+    return;
+  }
+  match.cooldownEndsAt.b = nextReady;
+  match.cooldownEndsAt.w = atMs;
+}
+
+function getTerminalStatus(game) {
+  if (isCheckmateForColor(game, 'w')) {
+    return { gameOver: true, result: 'black_wins_checkmate' };
+  }
+  if (isCheckmateForColor(game, 'b')) {
+    return { gameOver: true, result: 'white_wins_checkmate' };
   }
   if (game.isDraw()) {
-    return 'draw';
+    return { gameOver: true, result: 'draw' };
   }
-  return 'game_over';
+  return { gameOver: false, result: null };
+}
+
+function isCheckmateForColor(game, color) {
+  return withColorTurn(game, color, () => game.isCheckmate());
+}
+
+function isInCheckForColor(game, color) {
+  return withColorTurn(game, color, () => game.isCheck());
+}
+
+function hasAnyLegalMoveForColor(game, color) {
+  return withColorTurn(game, color, () => game.moves().length > 0);
+}
+
+function findValidatedLegalMove({ game, from, to, promotion, color }) {
+  return withColorTurn(game, color, () => {
+    const legalMoves = game.moves({ verbose: true });
+    for (const move of legalMoves) {
+      if (move.from !== from || move.to !== to) {
+        continue;
+      }
+      if (!move.promotion) {
+        return move;
+      }
+      if (move.promotion === promotion) {
+        return move;
+      }
+    }
+    return null;
+  });
+}
+
+function withColorTurn(game, color, callback) {
+  const previousTurn = game.turn();
+  game._turn = color;
+  try {
+    return callback();
+  } finally {
+    game._turn = previousTurn;
+  }
 }
 
 function sanitizeName(value) {
@@ -406,6 +546,17 @@ function sanitizeName(value) {
     return null;
   }
   return trimmed;
+}
+
+function sanitizeCooldownSeconds(value) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  if (parsed < MIN_COOLDOWN_SECONDS || parsed > MAX_COOLDOWN_SECONDS) {
+    return null;
+  }
+  return parsed;
 }
 
 function sanitizeSquare(value) {

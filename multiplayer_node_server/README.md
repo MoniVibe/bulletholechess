@@ -6,6 +6,10 @@ This service provides:
 - `GET /healthz` -> health
 - `WS /ws?matchId=...&playerId=...` -> real-time game channel
 
+`POST /api/matches/join` and `POST /api/matches/create` accept:
+- `name` (required)
+- `cooldownSeconds` (optional, only used when creating a new waiting match)
+
 It runs matchmaking and authoritative move validation in one Node.js process.
 
 ## Run locally
@@ -24,6 +28,7 @@ Env vars:
 - `PORT`
 - `BIND`
 - `MATCH_TTL_MS` (`>0` enables expiry cleanup)
+- `DEFAULT_COOLDOWN_SECONDS` (default `3`)
 
 ## Docker
 

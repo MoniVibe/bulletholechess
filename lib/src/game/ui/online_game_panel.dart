@@ -13,12 +13,15 @@ class OnlineGamePanel extends StatefulWidget {
 }
 
 class _OnlineGamePanelState extends State<OnlineGamePanel> {
+  static const List<int> _cooldownOptionsSeconds = [2, 3, 5, 7, 10];
+
   late final OnlineGameController _controller;
   late final TextEditingController _apiBaseController;
   late final TextEditingController _nameController;
 
   bool _connecting = false;
   bool _isMatchMenuOpen = false;
+  int _selectedCooldownSeconds = 3;
 
   @override
   void initState() {
@@ -49,6 +52,8 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
         final tailHistory = history.length > 8
             ? history.sublist(history.length - 8)
             : history;
+        final whiteRemaining = _controller.cooldownRemaining('w');
+        final blackRemaining = _controller.cooldownRemaining('b');
 
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -105,6 +110,33 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                               ),
                             ),
                             const SizedBox(height: 8),
+                            DropdownButtonFormField<int>(
+                              initialValue: _selectedCooldownSeconds,
+                              decoration: const InputDecoration(
+                                labelText: 'Cooldown (seconds)',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                              items: _cooldownOptionsSeconds
+                                  .map(
+                                    (seconds) => DropdownMenuItem<int>(
+                                      value: seconds,
+                                      child: Text('$seconds s'),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: connected
+                                  ? null
+                                  : (value) {
+                                      if (value == null) {
+                                        return;
+                                      }
+                                      setState(() {
+                                        _selectedCooldownSeconds = value;
+                                      });
+                                    },
+                            ),
+                            const SizedBox(height: 8),
                             Row(
                               children: [
                                 Expanded(
@@ -128,10 +160,28 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                               alignment: Alignment.centerLeft,
                               child: OutlinedButton.icon(
                                 onPressed: connected
-                                    ? _controller.requestNewGame
+                                    ? () => _controller.requestNewGame(
+                                        cooldownSeconds:
+                                            _selectedCooldownSeconds,
+                                      )
                                     : null,
                                 icon: const Icon(Icons.replay, size: 16),
                                 label: const Text('Request New Game'),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: OutlinedButton.icon(
+                                onPressed: _controller.hasQueuedMove
+                                    ? _controller.clearQueuedMove
+                                    : null,
+                                icon: const Icon(Icons.clear_all, size: 18),
+                                label: Text(
+                                  _controller.hasQueuedMove
+                                      ? 'Clear Queue (${_controller.queuedMoveLabel})'
+                                      : 'Clear Queue',
+                                ),
                               ),
                             ),
                           ],
@@ -193,6 +243,10 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                 : 'Black',
                           ),
                           _InfoChip(
+                            label: 'N',
+                            value: '${_controller.cooldownDuration.inSeconds}s',
+                          ),
+                          _InfoChip(
                             label: 'Turn',
                             value: _controller.isConnected
                                 ? _controller.turnColor == 'w'
@@ -211,6 +265,10 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                           _InfoChip(
                             label: 'Opp Last',
                             value: _controller.opponentLastMoveLabel ?? '-',
+                          ),
+                          _InfoChip(
+                            label: 'Queue',
+                            value: _controller.queuedMoveLabel ?? '-',
                           ),
                         ],
                       ),
@@ -237,8 +295,8 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                         return const SizedBox.shrink();
                       }
 
-                      final whiteRatio = _turnWaitRatio(_controller, 'w');
-                      final blackRatio = _turnWaitRatio(_controller, 'b');
+                      final whiteRatio = _cooldownRatio(_controller, 'w');
+                      final blackRatio = _cooldownRatio(_controller, 'b');
                       final whiteIsPlayer = _controller.myColor == 'w';
                       final blackIsPlayer = _controller.myColor == 'b';
 
@@ -254,13 +312,15 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                 ratio: whiteRatio,
                                 activeColor: const Color(0xFF42A5F5),
                                 isPlayerSide: whiteIsPlayer,
-                                statusLabel: _sideStatusLabel(_controller, 'w'),
+                                statusLabel: _controller.isMatchActive
+                                    ? _formatDuration(whiteRemaining)
+                                    : '--',
                                 statusOnTop: !whiteIsPlayer,
                                 readyToFlash:
                                     _controller.isConnected &&
                                     _controller.isMatchActive &&
                                     !_controller.isGameOver &&
-                                    _controller.turnColor == 'w',
+                                    whiteRemaining.inMilliseconds == 0,
                                 flashTint: const Color(0xFFBBDEFB),
                                 flashDuration: const Duration(
                                   milliseconds: 2600,
@@ -291,6 +351,8 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                     secondaryMoveHighlightColor: const Color(
                                       0xFFE57373,
                                     ),
+                                    queuedMoveFrom: _controller.queuedMoveFrom,
+                                    queuedMoveTo: _controller.queuedMoveTo,
                                     onSquareTap: _controller.tapSquare,
                                   ),
                                   if (!_controller.isConnected)
@@ -351,13 +413,15 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                 ratio: blackRatio,
                                 activeColor: const Color(0xFFFF7043),
                                 isPlayerSide: blackIsPlayer,
-                                statusLabel: _sideStatusLabel(_controller, 'b'),
+                                statusLabel: _controller.isMatchActive
+                                    ? _formatDuration(blackRemaining)
+                                    : '--',
                                 statusOnTop: !blackIsPlayer,
                                 readyToFlash:
                                     _controller.isConnected &&
                                     _controller.isMatchActive &&
                                     !_controller.isGameOver &&
-                                    _controller.turnColor == 'b',
+                                    blackRemaining.inMilliseconds == 0,
                                 flashTint: const Color(0xFFFFCCBC),
                                 flashDuration: const Duration(
                                   milliseconds: 3200,
@@ -406,29 +470,20 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
     );
   }
 
-  static double _turnWaitRatio(OnlineGameController controller, String color) {
-    if (!controller.isConnected ||
-        !controller.isMatchActive ||
-        controller.isGameOver) {
-      return 0;
-    }
-    return controller.turnColor == color ? 0 : 1;
+  static String _formatDuration(Duration duration) {
+    final seconds = duration.inMilliseconds / 1000.0;
+    return '${seconds.toStringAsFixed(1)}s';
   }
 
-  static String _sideStatusLabel(
-    OnlineGameController controller,
-    String color,
-  ) {
-    if (!controller.isConnected) {
-      return '--';
+  static double _cooldownRatio(OnlineGameController controller, String color) {
+    final totalMs = controller.cooldownDuration.inMilliseconds;
+    if (totalMs <= 0 || !controller.isMatchActive) {
+      return 0;
     }
-    if (controller.isWaitingForOpponent) {
-      return 'Wait';
-    }
-    if (controller.isGameOver) {
-      return 'Done';
-    }
-    return controller.turnColor == color ? 'Ready' : 'Hold';
+
+    final remainingMs = controller.cooldownRemaining(color).inMilliseconds;
+    final ratio = remainingMs / totalMs;
+    return ratio.clamp(0.0, 1.0);
   }
 
   Future<void> _findMatch() async {
@@ -440,6 +495,7 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
       await _controller.findMatch(
         apiBaseUrl: _apiBaseController.text,
         displayName: _nameController.text,
+        cooldownSeconds: _selectedCooldownSeconds,
       );
     } finally {
       if (mounted) {
