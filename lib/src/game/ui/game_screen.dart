@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../engine/local_game_controller.dart';
 import 'chess_board_view.dart';
+import 'cooldown_meter.dart';
+import 'mode_switch.dart';
 import 'online_game_panel.dart';
 
 enum _GameMode { local, online }
@@ -49,36 +51,20 @@ class _GameScreenState extends State<GameScreen> {
           body: SafeArea(
             child: Column(
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: SegmentedButton<_GameMode>(
-                      segments: const [
-                        ButtonSegment<_GameMode>(
-                          value: _GameMode.local,
-                          label: Text('Local vs Bot'),
-                          icon: Icon(Icons.smart_toy_outlined),
-                        ),
-                        ButtonSegment<_GameMode>(
-                          value: _GameMode.online,
-                          label: Text('Online Prototype'),
-                          icon: Icon(Icons.wifi),
-                        ),
-                      ],
-                      selected: <_GameMode>{_mode},
-                      onSelectionChanged: (selection) {
-                        setState(() {
-                          _mode = selection.first;
-                        });
-                      },
-                    ),
-                  ),
-                ),
                 Expanded(
                   child: IndexedStack(
                     index: _mode == _GameMode.local ? 0 : 1,
-                    children: [_buildLocalView(), const OnlineGamePanel()],
+                    children: [
+                      _buildLocalView(),
+                      OnlineGamePanel(
+                        isOnlineMode: _mode == _GameMode.online,
+                        onModeChanged: (online) {
+                          setState(() {
+                            _mode = online ? _GameMode.online : _GameMode.local;
+                          });
+                        },
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -112,15 +98,29 @@ class _GameScreenState extends State<GameScreen> {
               children: [
                 ListTile(
                   dense: true,
-                  title: const Text(
-                    'Game Menu',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  subtitle: const Text('New game and settings'),
-                  trailing: Icon(
-                    _isGameMenuOpen
-                        ? Icons.keyboard_arrow_up
-                        : Icons.keyboard_arrow_down,
+                  title: Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Game Menu',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      CompactModeSwitch(
+                        onlineSelected: false,
+                        onChanged: (online) {
+                          setState(() {
+                            _mode = online ? _GameMode.online : _GameMode.local;
+                          });
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      Icon(
+                        _isGameMenuOpen
+                            ? Icons.keyboard_arrow_up
+                            : Icons.keyboard_arrow_down,
+                      ),
+                    ],
                   ),
                   onTap: () {
                     setState(() {
@@ -195,39 +195,6 @@ class _GameScreenState extends State<GameScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          Card(
-            elevation: 0,
-            color: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _controller.statusText,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (_controller.feedback != null) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      _controller.feedback!,
-                      style: const TextStyle(
-                        color: Color(0xFFB71C1C),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
           Expanded(
             child: Center(
               child: LayoutBuilder(
@@ -242,16 +209,10 @@ class _GameScreenState extends State<GameScreen> {
                     return const SizedBox.shrink();
                   }
 
-                  final whiteRatio = _cooldownRatio(_controller, 'w');
-                  final blackRatio = _cooldownRatio(_controller, 'b');
                   final topColor = _controller.playerColor == 'w' ? 'b' : 'w';
                   final bottomColor = _controller.playerColor;
                   final whiteIsPlayer = _controller.playerColor == 'w';
                   final blackIsPlayer = _controller.playerColor == 'b';
-                  final topRatio = topColor == 'w' ? whiteRatio : blackRatio;
-                  final bottomRatio = bottomColor == 'w'
-                      ? whiteRatio
-                      : blackRatio;
                   final topRemaining = topColor == 'w'
                       ? whiteRemaining
                       : blackRemaining;
@@ -284,20 +245,21 @@ class _GameScreenState extends State<GameScreen> {
                       children: [
                         SizedBox(
                           height: barHeight,
-                          child: _HorizontalCooldownBar(
+                          child: CooldownMeter(
                             key: const ValueKey('top_bar'),
                             label: topColor == 'w' ? 'W' : 'B',
-                            ratio: topRatio,
+                            remaining: topRemaining,
+                            total: _controller.cooldownDuration,
                             activeColor: topActiveColor,
                             isPlayerSide: topIsPlayer,
-                            timerLabel: _controller.hasActiveGame
+                            timeLabel: _controller.hasActiveGame
                                 ? _formatDuration(topRemaining)
                                 : '--',
                             readyToFlash:
                                 _controller.hasActiveGame &&
                                 topRemaining.inMilliseconds == 0,
                             flashTint: topFlashTint,
-                            flashDuration: const Duration(milliseconds: 1800),
+                            flashDuration: const Duration(milliseconds: 700),
                           ),
                         ),
                         const SizedBox(height: boardGap),
@@ -347,20 +309,21 @@ class _GameScreenState extends State<GameScreen> {
                         const SizedBox(height: boardGap),
                         SizedBox(
                           height: barHeight,
-                          child: _HorizontalCooldownBar(
+                          child: CooldownMeter(
                             key: const ValueKey('bottom_bar'),
                             label: bottomColor == 'w' ? 'W' : 'B',
-                            ratio: bottomRatio,
+                            remaining: bottomRemaining,
+                            total: _controller.cooldownDuration,
                             activeColor: bottomActiveColor,
                             isPlayerSide: bottomIsPlayer,
-                            timerLabel: _controller.hasActiveGame
+                            timeLabel: _controller.hasActiveGame
                                 ? _formatDuration(bottomRemaining)
                                 : '--',
                             readyToFlash:
                                 _controller.hasActiveGame &&
                                 bottomRemaining.inMilliseconds == 0,
                             flashTint: bottomFlashTint,
-                            flashDuration: const Duration(milliseconds: 1800),
+                            flashDuration: const Duration(milliseconds: 700),
                           ),
                         ),
                       ],
@@ -404,19 +367,13 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   static String _formatDuration(Duration duration) {
-    final seconds = duration.inMilliseconds / 1000.0;
-    return '${seconds.toStringAsFixed(1)}s';
-  }
-
-  static double _cooldownRatio(LocalGameController controller, String color) {
-    final totalMs = controller.cooldownDuration.inMilliseconds;
-    if (totalMs <= 0) {
-      return 0;
+    final ms = duration.inMilliseconds;
+    if (ms <= 0) {
+      return '0.0s';
     }
-
-    final remainingMs = controller.cooldownRemaining(color).inMilliseconds;
-    final ratio = remainingMs / totalMs;
-    return ratio.clamp(0.0, 1.0);
+    final halfSteps = (ms / 500).ceil();
+    final halfSecondValue = halfSteps / 2;
+    return '${halfSecondValue.toStringAsFixed(1)}s';
   }
 
   Future<void> _showNewGamePrompt() async {
@@ -468,176 +425,5 @@ class _GameScreenState extends State<GameScreen> {
     setState(() {
       _isGameMenuOpen = false;
     });
-  }
-}
-
-class _HorizontalCooldownBar extends StatefulWidget {
-  const _HorizontalCooldownBar({
-    required this.label,
-    required this.ratio,
-    required this.activeColor,
-    required this.isPlayerSide,
-    required this.timerLabel,
-    required this.readyToFlash,
-    required this.flashTint,
-    required this.flashDuration,
-    super.key,
-  });
-
-  final String label;
-  final double ratio;
-  final Color activeColor;
-  final bool isPlayerSide;
-  final String timerLabel;
-  final bool readyToFlash;
-  final Color flashTint;
-  final Duration flashDuration;
-
-  @override
-  State<_HorizontalCooldownBar> createState() => _HorizontalCooldownBarState();
-}
-
-class _HorizontalCooldownBarState extends State<_HorizontalCooldownBar>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse;
-
-  @override
-  void initState() {
-    super.initState();
-    _pulse = AnimationController(vsync: this, duration: widget.flashDuration);
-    _syncPulse();
-  }
-
-  @override
-  void didUpdateWidget(covariant _HorizontalCooldownBar oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.flashDuration != widget.flashDuration) {
-      _pulse.duration = widget.flashDuration;
-    }
-    _syncPulse();
-  }
-
-  void _syncPulse() {
-    if (widget.readyToFlash) {
-      if (!_pulse.isAnimating) {
-        _pulse.repeat(reverse: true);
-      }
-      return;
-    }
-    if (_pulse.isAnimating) {
-      _pulse.stop();
-    }
-    _pulse.value = 0;
-  }
-
-  @override
-  void dispose() {
-    _pulse.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final ready = widget.ratio == 0;
-    final fillColor = ready ? const Color(0xFF43A047) : widget.activeColor;
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFDED6CB),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: Padding(
-              padding: const EdgeInsets.all(3),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: DecoratedBox(
-                  decoration: const BoxDecoration(color: Color(0xFF9E9489)),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: TweenAnimationBuilder<double>(
-                      tween: Tween<double>(begin: 0, end: widget.ratio),
-                      duration: const Duration(milliseconds: 280),
-                      curve: Curves.easeOutCubic,
-                      builder: (context, value, _) {
-                        return FractionallySizedBox(
-                          heightFactor: 1,
-                          widthFactor: value,
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.centerLeft,
-                                end: Alignment.centerRight,
-                                colors: [
-                                  fillColor.withValues(alpha: 0.55),
-                                  fillColor.withValues(alpha: 0.95),
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          if (widget.readyToFlash)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: AnimatedBuilder(
-                  animation: _pulse,
-                  builder: (context, _) {
-                    final opacity = 0.18 + (0.34 * _pulse.value);
-                    return DecoratedBox(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(10),
-                        color: widget.flashTint.withValues(alpha: opacity),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-          Positioned.fill(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Row(
-                children: [
-                  Text(
-                    widget.label,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 12,
-                      color: Color(0xFF1A1A1A),
-                    ),
-                  ),
-                  if (widget.isPlayerSide) ...[
-                    const SizedBox(width: 4),
-                    const Icon(
-                      Icons.person,
-                      size: 12,
-                      color: Color(0xFF1A1A1A),
-                    ),
-                  ],
-                  const Spacer(),
-                  Text(
-                    widget.timerLabel,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                      color: Color(0xFF1A1A1A),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }

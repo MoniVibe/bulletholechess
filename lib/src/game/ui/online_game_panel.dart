@@ -5,9 +5,18 @@ import 'package:flutter/services.dart';
 
 import '../engine/online_game_controller.dart';
 import 'chess_board_view.dart';
+import 'cooldown_meter.dart';
+import 'mode_switch.dart';
 
 class OnlineGamePanel extends StatefulWidget {
-  const OnlineGamePanel({super.key});
+  const OnlineGamePanel({
+    required this.isOnlineMode,
+    required this.onModeChanged,
+    super.key,
+  });
+
+  final bool isOnlineMode;
+  final ValueChanged<bool> onModeChanged;
 
   @override
   State<OnlineGamePanel> createState() => _OnlineGamePanelState();
@@ -77,15 +86,25 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                   children: [
                     ListTile(
                       dense: true,
-                      title: const Text(
-                        'Matchmaking',
-                        style: TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      subtitle: const Text('Backend and connection'),
-                      trailing: Icon(
-                        _isMatchMenuOpen
-                            ? Icons.keyboard_arrow_up
-                            : Icons.keyboard_arrow_down,
+                      title: Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Matchmaking',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                          CompactModeSwitch(
+                            onlineSelected: widget.isOnlineMode,
+                            onChanged: widget.onModeChanged,
+                          ),
+                          const SizedBox(width: 6),
+                          Icon(
+                            _isMatchMenuOpen
+                                ? Icons.keyboard_arrow_up
+                                : Icons.keyboard_arrow_down,
+                          ),
+                        ],
                       ),
                       onTap: () {
                         setState(() {
@@ -214,183 +233,6 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                 ),
               ),
               const SizedBox(height: 10),
-              Card(
-                elevation: 0,
-                color: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _controller.statusText,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      if (_controller.feedback != null) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          _controller.feedback!,
-                          style: const TextStyle(
-                            color: Color(0xFFB71C1C),
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Card(
-                elevation: 0,
-                color: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Column(
-                  children: [
-                    ListTile(
-                      dense: true,
-                      title: const Text(
-                        'Debug Log',
-                        style: TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      subtitle: Text(
-                        '${_controller.debugLogEntries.length} events',
-                      ),
-                      trailing: Icon(
-                        _isDebugLogOpen
-                            ? Icons.keyboard_arrow_up
-                            : Icons.keyboard_arrow_down,
-                      ),
-                      onTap: () {
-                        setState(() {
-                          _isDebugLogOpen = !_isDebugLogOpen;
-                        });
-                      },
-                    ),
-                    AnimatedCrossFade(
-                      firstChild: const SizedBox.shrink(),
-                      secondChild: Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                OutlinedButton.icon(
-                                  onPressed: _controller.debugLogEntries.isEmpty
-                                      ? null
-                                      : _controller.clearDebugLog,
-                                  icon: const Icon(
-                                    Icons.delete_outline,
-                                    size: 16,
-                                  ),
-                                  label: const Text('Clear Log'),
-                                ),
-                                const SizedBox(width: 8),
-                                OutlinedButton.icon(
-                                  onPressed: _controller.debugLogEntries.isEmpty
-                                      ? null
-                                      : _copyDebugReport,
-                                  icon: const Icon(
-                                    Icons.copy_all_outlined,
-                                    size: 16,
-                                  ),
-                                  label: const Text('Copy Report'),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                FilledButton.tonalIcon(
-                                  onPressed: _backendActionInFlight
-                                      ? null
-                                      : _pullServerLogs,
-                                  icon: const Icon(
-                                    Icons.download_outlined,
-                                    size: 16,
-                                  ),
-                                  label: const Text('Pull Server Logs'),
-                                ),
-                                const SizedBox(width: 8),
-                                const Expanded(
-                                  child: Text(
-                                    'Includes matchmaking, ownership validation, queue lifecycle, and socket events.',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Color(0xFF4E4A45),
-                                    ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Container(
-                              width: double.infinity,
-                              constraints: const BoxConstraints(maxHeight: 180),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF7F4EF),
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                  color: const Color(0xFFD7D0C5),
-                                ),
-                              ),
-                              child: _controller.debugLogEntries.isEmpty
-                                  ? const Padding(
-                                      padding: EdgeInsets.all(12),
-                                      child: Text(
-                                        'No debug events yet.',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Color(0xFF4E4A45),
-                                        ),
-                                      ),
-                                    )
-                                  : ListView.separated(
-                                      shrinkWrap: true,
-                                      padding: const EdgeInsets.all(10),
-                                      itemCount:
-                                          _controller.debugLogEntries.length >
-                                              60
-                                          ? 60
-                                          : _controller.debugLogEntries.length,
-                                      separatorBuilder: (_, _) =>
-                                          const SizedBox(height: 6),
-                                      itemBuilder: (context, index) {
-                                        return SelectableText(
-                                          _controller.debugLogEntries[index],
-                                          style: const TextStyle(
-                                            fontSize: 11,
-                                            height: 1.3,
-                                            fontFamily: 'monospace',
-                                            color: Color(0xFF1A1A1A),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      crossFadeState: _isDebugLogOpen
-                          ? CrossFadeState.showSecond
-                          : CrossFadeState.showFirst,
-                      duration: const Duration(milliseconds: 180),
-                      sizeCurve: Curves.easeOutCubic,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 10),
               Expanded(
                 child: Center(
                   child: LayoutBuilder(
@@ -407,20 +249,12 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                         return const SizedBox.shrink();
                       }
 
-                      final whiteRatio = _cooldownRatio(_controller, 'w');
-                      final blackRatio = _cooldownRatio(_controller, 'b');
                       final topColor = _controller.playerColor == 'w'
                           ? 'b'
                           : 'w';
                       final bottomColor = _controller.playerColor;
                       final whiteIsPlayer = _controller.myColor == 'w';
                       final blackIsPlayer = _controller.myColor == 'b';
-                      final topRatio = topColor == 'w'
-                          ? whiteRatio
-                          : blackRatio;
-                      final bottomRatio = bottomColor == 'w'
-                          ? whiteRatio
-                          : blackRatio;
                       final topRemaining = topColor == 'w'
                           ? whiteRemaining
                           : blackRemaining;
@@ -453,12 +287,13 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                           children: [
                             SizedBox(
                               height: barHeight,
-                              child: _HorizontalStatusBar(
+                              child: CooldownMeter(
                                 label: topColor == 'w' ? 'W' : 'B',
-                                ratio: topRatio,
+                                remaining: topRemaining,
+                                total: _controller.cooldownDuration,
                                 activeColor: topActiveColor,
                                 isPlayerSide: topIsPlayer,
-                                statusLabel: _controller.isMatchActive
+                                timeLabel: _controller.isMatchActive
                                     ? _formatDuration(topRemaining)
                                     : '--',
                                 readyToFlash:
@@ -468,7 +303,7 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                     topRemaining.inMilliseconds == 0,
                                 flashTint: topFlashTint,
                                 flashDuration: const Duration(
-                                  milliseconds: 1800,
+                                  milliseconds: 700,
                                 ),
                               ),
                             ),
@@ -553,12 +388,13 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                             const SizedBox(height: boardGap),
                             SizedBox(
                               height: barHeight,
-                              child: _HorizontalStatusBar(
+                              child: CooldownMeter(
                                 label: bottomColor == 'w' ? 'W' : 'B',
-                                ratio: bottomRatio,
+                                remaining: bottomRemaining,
+                                total: _controller.cooldownDuration,
                                 activeColor: bottomActiveColor,
                                 isPlayerSide: bottomIsPlayer,
-                                statusLabel: _controller.isMatchActive
+                                timeLabel: _controller.isMatchActive
                                     ? _formatDuration(bottomRemaining)
                                     : '--',
                                 readyToFlash:
@@ -568,7 +404,7 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                     bottomRemaining.inMilliseconds == 0,
                                 flashTint: bottomFlashTint,
                                 flashDuration: const Duration(
-                                  milliseconds: 1800,
+                                  milliseconds: 700,
                                 ),
                               ),
                             ),
@@ -615,19 +451,13 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
   }
 
   static String _formatDuration(Duration duration) {
-    final seconds = duration.inMilliseconds / 1000.0;
-    return '${seconds.toStringAsFixed(1)}s';
-  }
-
-  static double _cooldownRatio(OnlineGameController controller, String color) {
-    final totalMs = controller.cooldownDuration.inMilliseconds;
-    if (totalMs <= 0 || !controller.isMatchActive) {
-      return 0;
+    final ms = duration.inMilliseconds;
+    if (ms <= 0) {
+      return '0.0s';
     }
-
-    final remainingMs = controller.cooldownRemaining(color).inMilliseconds;
-    final ratio = remainingMs / totalMs;
-    return ratio.clamp(0.0, 1.0);
+    final halfSteps = (ms / 500).ceil();
+    final halfSecondValue = halfSteps / 2;
+    return '${halfSecondValue.toStringAsFixed(1)}s';
   }
 
   Future<void> _findMatch() async {
@@ -670,6 +500,11 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
           _backendActionInFlight = false;
         });
       }
+      if (mounted) {
+        setState(() {
+          _backendActionInFlight = false;
+        });
+      }
     }
   }
 
@@ -689,38 +524,6 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
         });
       }
     }
-  }
-
-  Future<void> _copyDebugReport() async {
-    final text = _controller.buildDebugReport();
-    await Clipboard.setData(ClipboardData(text: text));
-    if (!mounted) {
-      return;
-    }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Debug report copied.')));
-  }
-
-  Future<void> _pullServerLogs() async {
-    if (_backendActionInFlight) {
-      return;
-    }
-    setState(() {
-      _backendActionInFlight = true;
-    });
-    final count = await _controller.pullServerDebugLogs(
-      apiBaseUrl: _apiBaseController.text,
-    );
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _backendActionInFlight = false;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Pulled $count server log entries.')),
-    );
   }
 }
 
@@ -839,175 +642,5 @@ class _BackendHealthCard extends StatelessWidget {
       case BackendHealthState.unhealthy:
         return (icon: Icons.error_outline, color: const Color(0xFFB71C1C));
     }
-  }
-}
-
-class _HorizontalStatusBar extends StatefulWidget {
-  const _HorizontalStatusBar({
-    required this.label,
-    required this.ratio,
-    required this.activeColor,
-    required this.isPlayerSide,
-    required this.statusLabel,
-    required this.readyToFlash,
-    required this.flashTint,
-    required this.flashDuration,
-  });
-
-  final String label;
-  final double ratio;
-  final Color activeColor;
-  final bool isPlayerSide;
-  final String statusLabel;
-  final bool readyToFlash;
-  final Color flashTint;
-  final Duration flashDuration;
-
-  @override
-  State<_HorizontalStatusBar> createState() => _HorizontalStatusBarState();
-}
-
-class _HorizontalStatusBarState extends State<_HorizontalStatusBar>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse;
-
-  @override
-  void initState() {
-    super.initState();
-    _pulse = AnimationController(vsync: this, duration: widget.flashDuration);
-    _syncPulse();
-  }
-
-  @override
-  void didUpdateWidget(covariant _HorizontalStatusBar oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.flashDuration != widget.flashDuration) {
-      _pulse.duration = widget.flashDuration;
-    }
-    _syncPulse();
-  }
-
-  void _syncPulse() {
-    if (widget.readyToFlash) {
-      if (!_pulse.isAnimating) {
-        _pulse.repeat(reverse: true);
-      }
-      return;
-    }
-    if (_pulse.isAnimating) {
-      _pulse.stop();
-    }
-    _pulse.value = 0;
-  }
-
-  @override
-  void dispose() {
-    _pulse.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final ready = widget.ratio == 0;
-    final fillColor = ready ? const Color(0xFF43A047) : widget.activeColor;
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFDED6CB),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: Padding(
-              padding: const EdgeInsets.all(3),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: DecoratedBox(
-                  decoration: const BoxDecoration(color: Color(0xFF9E9489)),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: TweenAnimationBuilder<double>(
-                      tween: Tween<double>(begin: 0, end: widget.ratio),
-                      duration: const Duration(milliseconds: 280),
-                      curve: Curves.easeOutCubic,
-                      builder: (context, value, _) {
-                        return FractionallySizedBox(
-                          heightFactor: 1,
-                          widthFactor: value,
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.centerLeft,
-                                end: Alignment.centerRight,
-                                colors: [
-                                  fillColor.withValues(alpha: 0.55),
-                                  fillColor.withValues(alpha: 0.95),
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-          if (widget.readyToFlash)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: AnimatedBuilder(
-                  animation: _pulse,
-                  builder: (context, _) {
-                    final opacity = 0.18 + (0.34 * _pulse.value);
-                    return DecoratedBox(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(10),
-                        color: widget.flashTint.withValues(alpha: opacity),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-          Positioned.fill(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Row(
-                children: [
-                  Text(
-                    widget.label,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 12,
-                      color: Color(0xFF1A1A1A),
-                    ),
-                  ),
-                  if (widget.isPlayerSide) ...[
-                    const SizedBox(width: 4),
-                    const Icon(
-                      Icons.person,
-                      size: 12,
-                      color: Color(0xFF1A1A1A),
-                    ),
-                  ],
-                  const Spacer(),
-                  Text(
-                    widget.statusLabel,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                      color: Color(0xFF1A1A1A),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
