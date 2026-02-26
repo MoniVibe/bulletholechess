@@ -19,12 +19,15 @@ class OnlineGameController extends ChangeNotifier {
   int _sequence = 0;
   String? _selectedSquare;
   Set<String> _legalTargets = <String>{};
+  String? _myLastMoveFrom;
+  String? _myLastMoveTo;
+  String? _opponentLastMoveFrom;
+  String? _opponentLastMoveTo;
   String? _lastMoveFrom;
   String? _lastMoveTo;
   String? _lastMoverColor;
   String? _feedback;
   String? _matchId;
-  String? _joinCode;
   String? _myColor;
   String _status = 'disconnected';
   String? _whitePlayerName;
@@ -36,14 +39,19 @@ class OnlineGameController extends ChangeNotifier {
   bool get isConnected => _connectionState == OnlineConnectionState.connected;
   String? get roomId => _matchId;
   String? get matchId => _matchId;
-  String? get joinCode => _joinCode;
   String? get myColor => _myColor;
+  bool get isWaitingForOpponent => _status == 'waiting';
+  bool get isMatchActive => _status == 'active';
   String get turnColor => _colorCode(_game.turn);
   bool get isMyTurn => _myColor != null && _myColor == turnColor;
   bool get isGameOver => _result != null || _game.game_over;
   String? get resultCode => _result;
   String? get selectedSquare => _selectedSquare;
   Set<String> get legalTargets => _legalTargets;
+  String? get playerLastMoveFrom => _myLastMoveFrom;
+  String? get playerLastMoveTo => _myLastMoveTo;
+  String? get opponentLastMoveFrom => _opponentLastMoveFrom;
+  String? get opponentLastMoveTo => _opponentLastMoveTo;
   String? get lastMoveFrom => _lastMoveFrom;
   String? get lastMoveTo => _lastMoveTo;
   bool get isOpponentLastMove =>
@@ -51,10 +59,10 @@ class OnlineGameController extends ChangeNotifier {
       _myColor != null &&
       _lastMoverColor != _myColor;
   String? get opponentLastMoveLabel {
-    if (!isOpponentLastMove || _lastMoveFrom == null || _lastMoveTo == null) {
+    if (_opponentLastMoveFrom == null || _opponentLastMoveTo == null) {
       return null;
     }
-    return '$_lastMoveFrom-$_lastMoveTo';
+    return '$_opponentLastMoveFrom-$_opponentLastMoveTo';
   }
 
   String? get feedback => _feedback;
@@ -73,7 +81,7 @@ class OnlineGameController extends ChangeNotifier {
     }
 
     if (_status == 'waiting') {
-      return 'Connected. Waiting for opponent to join invite ${_joinCode ?? '-'}.';
+      return 'Connected. Waiting for another player...';
     }
 
     if (isGameOver) {
@@ -111,7 +119,7 @@ class OnlineGameController extends ChangeNotifier {
     return 'Opponent turn.';
   }
 
-  Future<void> createInvite({
+  Future<void> findMatch({
     required String apiBaseUrl,
     required String displayName,
   }) async {
@@ -129,7 +137,7 @@ class OnlineGameController extends ChangeNotifier {
     try {
       final baseUri = _parseBaseUri(apiBaseUrl);
       final response = await http.post(
-        baseUri.resolve('/api/matches/create'),
+        baseUri.resolve('/api/matches/join'),
         headers: const {'content-type': 'application/json'},
         body: jsonEncode(<String, dynamic>{'name': normalizedName}),
       );
@@ -137,19 +145,17 @@ class OnlineGameController extends ChangeNotifier {
       final body = _decodeResponseMap(response.body);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw Exception(
-          body['error'] ?? 'Create invite failed (${response.statusCode}).',
+          body['error'] ?? 'Matchmaking failed (${response.statusCode}).',
         );
       }
 
       final matchId = body['matchId'] as String?;
       final playerId = body['playerId'] as String?;
       final wsPath = body['wsPath'] as String? ?? '/ws';
-      final joinCode = body['joinCode'] as String?;
       if (matchId == null || playerId == null) {
-        throw Exception('Invalid create-match response from server.');
+        throw Exception('Invalid match response from server.');
       }
 
-      _joinCode = joinCode;
       await _connectWebSocket(
         baseUri: baseUri,
         wsPath: wsPath,
@@ -158,65 +164,7 @@ class OnlineGameController extends ChangeNotifier {
       );
     } catch (error) {
       _connectionState = OnlineConnectionState.disconnected;
-      _feedback = 'Create invite failed: $error';
-      notifyListeners();
-    }
-  }
-
-  Future<void> joinInvite({
-    required String apiBaseUrl,
-    required String joinCode,
-    required String displayName,
-  }) async {
-    final normalizedJoinCode = joinCode.trim().toUpperCase();
-    final normalizedName = displayName.trim();
-
-    if (normalizedJoinCode.isEmpty || normalizedName.isEmpty) {
-      _feedback = 'Invite code and display name are required.';
-      notifyListeners();
-      return;
-    }
-
-    _connectionState = OnlineConnectionState.connecting;
-    _feedback = null;
-    notifyListeners();
-
-    try {
-      final baseUri = _parseBaseUri(apiBaseUrl);
-      final response = await http.post(
-        baseUri.resolve('/api/matches/join'),
-        headers: const {'content-type': 'application/json'},
-        body: jsonEncode(<String, dynamic>{
-          'joinCode': normalizedJoinCode,
-          'name': normalizedName,
-        }),
-      );
-
-      final body = _decodeResponseMap(response.body);
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception(
-          body['error'] ?? 'Join invite failed (${response.statusCode}).',
-        );
-      }
-
-      final matchId = body['matchId'] as String?;
-      final playerId = body['playerId'] as String?;
-      final wsPath = body['wsPath'] as String? ?? '/ws';
-      final joinedCode = body['joinCode'] as String?;
-      if (matchId == null || playerId == null) {
-        throw Exception('Invalid join-match response from server.');
-      }
-
-      _joinCode = joinedCode ?? normalizedJoinCode;
-      await _connectWebSocket(
-        baseUri: baseUri,
-        wsPath: wsPath,
-        matchId: matchId,
-        playerId: playerId,
-      );
-    } catch (error) {
-      _connectionState = OnlineConnectionState.disconnected;
-      _feedback = 'Join invite failed: $error';
+      _feedback = 'Matchmaking failed: $error';
       notifyListeners();
     }
   }
@@ -285,7 +233,17 @@ class OnlineGameController extends ChangeNotifier {
     _matchId = null;
     _myColor = null;
     _lastMoverColor = null;
+    _myLastMoveFrom = null;
+    _myLastMoveTo = null;
+    _opponentLastMoveFrom = null;
+    _opponentLastMoveTo = null;
+    _lastMoveFrom = null;
+    _lastMoveTo = null;
+    _whitePlayerName = null;
+    _blackPlayerName = null;
     _result = null;
+    _sequence = 0;
+    _feedback = null;
     if (notify) {
       notifyListeners();
     }
@@ -401,11 +359,16 @@ class OnlineGameController extends ChangeNotifier {
       return;
     }
 
-    final decoded = jsonDecode(raw);
-    if (decoded is! Map) {
+    Map<String, dynamic> map;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) {
+        return;
+      }
+      map = Map<String, dynamic>.from(decoded);
+    } catch (_) {
       return;
     }
-    final map = Map<String, dynamic>.from(decoded);
 
     final type = map['type'];
     if (type is! String) {
@@ -416,7 +379,6 @@ class OnlineGameController extends ChangeNotifier {
       case 'welcome':
         _connectionState = OnlineConnectionState.connected;
         _matchId = map['matchId'] as String? ?? _matchId;
-        _joinCode = map['joinCode'] as String? ?? _joinCode;
         _myColor = map['color'] as String?;
         _feedback = null;
         notifyListeners();
@@ -457,7 +419,6 @@ class OnlineGameController extends ChangeNotifier {
 
     _status = state['status'] as String? ?? _status;
     _result = state['result'] as String?;
-    _joinCode = state['joinCode'] as String? ?? _joinCode;
 
     final players = state['players'];
     if (players is Map<String, dynamic>) {
@@ -470,10 +431,22 @@ class OnlineGameController extends ChangeNotifier {
       _lastMoveFrom = lastMove['from'] as String?;
       _lastMoveTo = lastMove['to'] as String?;
       final turnAfterMove = state['turn'] as String? ?? turnColor;
-      _lastMoverColor = _oppositeColor(turnAfterMove);
+      final moverColor = _oppositeColor(turnAfterMove);
+      _lastMoverColor = moverColor;
+      if (_myColor != null && moverColor == _myColor) {
+        _myLastMoveFrom = _lastMoveFrom;
+        _myLastMoveTo = _lastMoveTo;
+      } else {
+        _opponentLastMoveFrom = _lastMoveFrom;
+        _opponentLastMoveTo = _lastMoveTo;
+      }
     } else {
       final history = state['history'];
       if (history is List && history.isEmpty) {
+        _myLastMoveFrom = null;
+        _myLastMoveTo = null;
+        _opponentLastMoveFrom = null;
+        _opponentLastMoveTo = null;
         _lastMoveFrom = null;
         _lastMoveTo = null;
         _lastMoverColor = null;

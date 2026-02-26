@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../engine/online_game_controller.dart';
@@ -14,9 +16,9 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
   late final OnlineGameController _controller;
   late final TextEditingController _apiBaseController;
   late final TextEditingController _nameController;
-  late final TextEditingController _joinCodeController;
 
   bool _connecting = false;
+  bool _isMatchMenuOpen = false;
 
   @override
   void initState() {
@@ -24,14 +26,12 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
     _controller = OnlineGameController();
     _apiBaseController = TextEditingController(text: 'http://localhost:8080');
     _nameController = TextEditingController(text: 'Player');
-    _joinCodeController = TextEditingController();
   }
 
   @override
   void dispose() {
     _apiBaseController.dispose();
     _nameController.dispose();
-    _joinCodeController.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -45,93 +45,141 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
             _controller.connectionState == OnlineConnectionState.connected;
         final canStart = !connected && !_connecting;
 
+        final history = _controller.history;
+        final tailHistory = history.length > 8
+            ? history.sublist(history.length - 8)
+            : history;
+
         return Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
           child: Column(
             children: [
               Card(
                 elevation: 0,
                 color: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Column(
+                  children: [
+                    ListTile(
+                      dense: true,
+                      title: const Text(
+                        'Matchmaking',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      subtitle: const Text('Backend and connection'),
+                      trailing: Icon(
+                        _isMatchMenuOpen
+                            ? Icons.keyboard_arrow_up
+                            : Icons.keyboard_arrow_down,
+                      ),
+                      onTap: () {
+                        setState(() {
+                          _isMatchMenuOpen = !_isMatchMenuOpen;
+                        });
+                      },
+                    ),
+                    AnimatedCrossFade(
+                      firstChild: const SizedBox.shrink(),
+                      secondChild: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                        child: Column(
+                          children: [
+                            TextField(
+                              controller: _apiBaseController,
+                              decoration: const InputDecoration(
+                                labelText: 'Backend URL',
+                                hintText: 'https://your-backend.example.com',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: _nameController,
+                              decoration: const InputDecoration(
+                                labelText: 'Display Name',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: FilledButton.icon(
+                                    onPressed: canStart ? _findMatch : null,
+                                    icon: const Icon(Icons.groups_2_outlined),
+                                    label: const Text('Find Match'),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: OutlinedButton(
+                                    onPressed: connected ? _disconnect : null,
+                                    child: const Text('Disconnect'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: OutlinedButton.icon(
+                                onPressed: connected
+                                    ? _controller.requestNewGame
+                                    : null,
+                                icon: const Icon(Icons.replay, size: 16),
+                                label: const Text('Request New Game'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      crossFadeState: _isMatchMenuOpen
+                          ? CrossFadeState.showSecond
+                          : CrossFadeState.showFirst,
+                      duration: const Duration(milliseconds: 180),
+                      sizeCurve: Curves.easeOutCubic,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              Card(
+                elevation: 0,
+                color: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      TextField(
-                        controller: _apiBaseController,
-                        decoration: const InputDecoration(
-                          labelText: 'Backend URL',
-                          hintText: 'https://your-backend.example.com',
-                          border: OutlineInputBorder(),
-                          isDense: true,
+                      Text(
+                        _controller.statusText,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _nameController,
-                        decoration: const InputDecoration(
-                          labelText: 'Display Name',
-                          border: OutlineInputBorder(),
-                          isDense: true,
+                      if (_controller.feedback != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          _controller.feedback!,
+                          style: const TextStyle(
+                            color: Color(0xFFB71C1C),
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: canStart ? _createInvite : null,
-                              icon: const Icon(Icons.link),
-                              label: const Text('Create Invite'),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: connected ? _disconnect : null,
-                              child: const Text('Disconnect'),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _joinCodeController,
-                              textCapitalization: TextCapitalization.characters,
-                              decoration: const InputDecoration(
-                                labelText: 'Invite Code',
-                                border: OutlineInputBorder(),
-                                isDense: true,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          FilledButton.tonal(
-                            onPressed: canStart ? _joinInvite : null,
-                            child: const Text('Join Invite'),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      OutlinedButton.icon(
-                        onPressed: connected
-                            ? _controller.requestNewGame
-                            : null,
-                        icon: const Icon(Icons.replay, size: 16),
-                        label: const Text('Request New Game'),
-                      ),
+                      ],
                       const SizedBox(height: 8),
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
                         children: [
-                          _InfoChip(
-                            label: 'Invite',
-                            value: _controller.joinCode ?? '-',
-                          ),
                           _InfoChip(
                             label: 'Match',
                             value: _controller.matchId ?? '-',
@@ -146,9 +194,11 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                           ),
                           _InfoChip(
                             label: 'Turn',
-                            value: _controller.turnColor == 'w'
-                                ? 'White'
-                                : 'Black',
+                            value: _controller.isConnected
+                                ? _controller.turnColor == 'w'
+                                      ? 'White'
+                                      : 'Black'
+                                : '-',
                           ),
                           _InfoChip(
                             label: 'White',
@@ -164,49 +214,170 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _controller.statusText,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      if (_controller.feedback != null) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          _controller.feedback!,
-                          style: const TextStyle(
-                            color: Color(0xFFB71C1C),
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
                     ],
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               Expanded(
                 child: Center(
-                  child: AspectRatio(
-                    aspectRatio: 1,
-                    child: ChessBoardView(
-                      pieces: _controller.boardPieces,
-                      playerColor: _controller.playerColor,
-                      selectedSquare: _controller.selectedSquare,
-                      legalTargets: _controller.legalTargets,
-                      lastMoveFrom: _controller.lastMoveFrom,
-                      lastMoveTo: _controller.lastMoveTo,
-                      lastMoveHighlightColor: _controller.isOpponentLastMove
-                          ? const Color(0xFFE57373)
-                          : const Color(0xFFD7CA64),
-                      onSquareTap: _controller.tapSquare,
-                    ),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      const sideBarWidth = 40.0;
+                      const sideGap = 10.0;
+                      final maxBoardWidth =
+                          constraints.maxWidth -
+                          (sideBarWidth * 2) -
+                          (sideGap * 2);
+                      final boardSize = math.min(
+                        maxBoardWidth,
+                        constraints.maxHeight,
+                      );
+                      if (boardSize <= 0) {
+                        return const SizedBox.shrink();
+                      }
+
+                      final whiteRatio = _turnWaitRatio(_controller, 'w');
+                      final blackRatio = _turnWaitRatio(_controller, 'b');
+                      final whiteIsPlayer = _controller.myColor == 'w';
+                      final blackIsPlayer = _controller.myColor == 'b';
+
+                      return SizedBox(
+                        width: boardSize + (sideBarWidth * 2) + (sideGap * 2),
+                        height: boardSize,
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: sideBarWidth,
+                              child: _SideStatusBar(
+                                label: 'W',
+                                ratio: whiteRatio,
+                                activeColor: const Color(0xFF42A5F5),
+                                isPlayerSide: whiteIsPlayer,
+                                statusLabel: _sideStatusLabel(_controller, 'w'),
+                                statusOnTop: !whiteIsPlayer,
+                                readyToFlash:
+                                    _controller.isConnected &&
+                                    _controller.isMatchActive &&
+                                    !_controller.isGameOver &&
+                                    _controller.turnColor == 'w',
+                                flashTint: const Color(0xFFBBDEFB),
+                                flashDuration: const Duration(
+                                  milliseconds: 2600,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: sideGap),
+                            SizedBox(
+                              width: boardSize,
+                              height: boardSize,
+                              child: Stack(
+                                children: [
+                                  ChessBoardView(
+                                    pieces: _controller.boardPieces,
+                                    playerColor: _controller.playerColor,
+                                    selectedSquare: _controller.selectedSquare,
+                                    legalTargets: _controller.legalTargets,
+                                    lastMoveFrom:
+                                        _controller.playerLastMoveFrom,
+                                    lastMoveTo: _controller.playerLastMoveTo,
+                                    lastMoveHighlightColor: const Color(
+                                      0xFFD7CA64,
+                                    ),
+                                    secondaryMoveFrom:
+                                        _controller.opponentLastMoveFrom,
+                                    secondaryMoveTo:
+                                        _controller.opponentLastMoveTo,
+                                    secondaryMoveHighlightColor: const Color(
+                                      0xFFE57373,
+                                    ),
+                                    onSquareTap: _controller.tapSquare,
+                                  ),
+                                  if (!_controller.isConnected)
+                                    Positioned.fill(
+                                      child: DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.2,
+                                          ),
+                                        ),
+                                        child: Center(
+                                          child: FilledButton.icon(
+                                            onPressed: canStart
+                                                ? _findMatch
+                                                : null,
+                                            icon: const Icon(
+                                              Icons.groups_2_outlined,
+                                            ),
+                                            label: const Text('Find Match'),
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                  else if (_controller.isWaitingForOpponent)
+                                    Positioned.fill(
+                                      child: DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.2,
+                                          ),
+                                        ),
+                                        child: const Center(
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              CircularProgressIndicator(),
+                                              SizedBox(height: 12),
+                                              Text(
+                                                'Waiting for opponent...',
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.w700,
+                                                  color: Color(0xFF1A1A1A),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: sideGap),
+                            SizedBox(
+                              width: sideBarWidth,
+                              child: _SideStatusBar(
+                                label: 'B',
+                                ratio: blackRatio,
+                                activeColor: const Color(0xFFFF7043),
+                                isPlayerSide: blackIsPlayer,
+                                statusLabel: _sideStatusLabel(_controller, 'b'),
+                                statusOnTop: !blackIsPlayer,
+                                readyToFlash:
+                                    _controller.isConnected &&
+                                    _controller.isMatchActive &&
+                                    !_controller.isGameOver &&
+                                    _controller.turnColor == 'b',
+                                flashTint: const Color(0xFFFFCCBC),
+                                flashDuration: const Duration(
+                                  milliseconds: 3200,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               Card(
                 elevation: 0,
                 color: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Row(
@@ -219,9 +390,7 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          _controller.history.isEmpty
-                              ? '-'
-                              : _controller.history.join('  '),
+                          tailHistory.isEmpty ? '-' : tailHistory.join('  '),
                           maxLines: 3,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -237,43 +406,46 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
     );
   }
 
-  Future<void> _createInvite() async {
-    setState(() {
-      _connecting = true;
-    });
-
-    try {
-      await _controller.createInvite(
-        apiBaseUrl: _apiBaseController.text,
-        displayName: _nameController.text,
-      );
-      if (_controller.joinCode != null) {
-        _joinCodeController.text = _controller.joinCode!;
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _connecting = false;
-        });
-      }
+  static double _turnWaitRatio(OnlineGameController controller, String color) {
+    if (!controller.isConnected ||
+        !controller.isMatchActive ||
+        controller.isGameOver) {
+      return 0;
     }
+    return controller.turnColor == color ? 0 : 1;
   }
 
-  Future<void> _joinInvite() async {
+  static String _sideStatusLabel(
+    OnlineGameController controller,
+    String color,
+  ) {
+    if (!controller.isConnected) {
+      return '--';
+    }
+    if (controller.isWaitingForOpponent) {
+      return 'Wait';
+    }
+    if (controller.isGameOver) {
+      return 'Done';
+    }
+    return controller.turnColor == color ? 'Ready' : 'Hold';
+  }
+
+  Future<void> _findMatch() async {
     setState(() {
       _connecting = true;
     });
 
     try {
-      await _controller.joinInvite(
+      await _controller.findMatch(
         apiBaseUrl: _apiBaseController.text,
-        joinCode: _joinCodeController.text,
         displayName: _nameController.text,
       );
     } finally {
       if (mounted) {
         setState(() {
           _connecting = false;
+          _isMatchMenuOpen = false;
         });
       }
     }
@@ -304,6 +476,180 @@ class _InfoChip extends StatelessWidget {
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
       ),
+    );
+  }
+}
+
+class _SideStatusBar extends StatefulWidget {
+  const _SideStatusBar({
+    required this.label,
+    required this.ratio,
+    required this.activeColor,
+    required this.isPlayerSide,
+    required this.statusLabel,
+    required this.statusOnTop,
+    required this.readyToFlash,
+    required this.flashTint,
+    required this.flashDuration,
+  });
+
+  final String label;
+  final double ratio;
+  final Color activeColor;
+  final bool isPlayerSide;
+  final String statusLabel;
+  final bool statusOnTop;
+  final bool readyToFlash;
+  final Color flashTint;
+  final Duration flashDuration;
+
+  @override
+  State<_SideStatusBar> createState() => _SideStatusBarState();
+}
+
+class _SideStatusBarState extends State<_SideStatusBar>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(vsync: this, duration: widget.flashDuration)
+      ..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ready = widget.ratio == 0;
+    final fillColor = ready ? const Color(0xFF43A047) : widget.activeColor;
+
+    return Column(
+      children: [
+        if (widget.statusOnTop)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              widget.statusLabel,
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 11,
+                color: Color(0xFF1A1A1A),
+              ),
+            ),
+          ),
+        Expanded(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: const Color(0xFFDED6CB),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: Padding(
+                    padding: const EdgeInsets.all(3),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: DecoratedBox(
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF9E9489),
+                        ),
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: TweenAnimationBuilder<double>(
+                            tween: Tween<double>(begin: 0, end: widget.ratio),
+                            duration: const Duration(milliseconds: 160),
+                            builder: (context, value, _) {
+                              return FractionallySizedBox(
+                                heightFactor: value,
+                                widthFactor: 1,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.bottomCenter,
+                                      end: Alignment.topCenter,
+                                      colors: [
+                                        fillColor.withValues(alpha: 0.95),
+                                        fillColor.withValues(alpha: 0.55),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                if (widget.readyToFlash)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: AnimatedBuilder(
+                        animation: _pulse,
+                        builder: (context, _) {
+                          final opacity = 0.08 + (0.2 * _pulse.value);
+                          return DecoratedBox(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(10),
+                              color: widget.flashTint.withValues(
+                                alpha: opacity,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                Positioned(
+                  top: 6,
+                  left: 0,
+                  right: 0,
+                  child: Text(
+                    widget.label,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 11,
+                      color: Color(0xFF1A1A1A),
+                    ),
+                  ),
+                ),
+                if (widget.isPlayerSide)
+                  const Positioned(
+                    bottom: 6,
+                    left: 0,
+                    right: 0,
+                    child: Icon(
+                      Icons.person,
+                      size: 12,
+                      color: Color(0xFF1A1A1A),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        if (!widget.statusOnTop)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              widget.statusLabel,
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 11,
+                color: Color(0xFF1A1A1A),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
