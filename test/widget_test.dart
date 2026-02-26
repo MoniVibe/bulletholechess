@@ -5,8 +5,7 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
-import 'dart:ui';
-
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:bulletholechess/main.dart';
@@ -25,9 +24,11 @@ void main() {
     await tester.pumpWidget(const BulletholeChessApp());
     await tester.pump();
 
-    expect(find.text('Bullethole Chess MVP'), findsOneWidget);
+    expect(find.byType(AppBar), findsNothing);
     expect(find.text('Game Menu'), findsOneWidget);
     expect(find.textContaining('Moves:'), findsOneWidget);
+    expect(find.byKey(const ValueKey('top_bar')), findsOneWidget);
+    expect(find.byKey(const ValueKey('bottom_bar')), findsOneWidget);
 
     await tester.tap(find.text('Game Menu'));
     await tester.pumpAndSettle();

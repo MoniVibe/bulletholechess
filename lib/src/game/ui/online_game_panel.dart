@@ -229,53 +229,6 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                           ),
                         ),
                       ],
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          _InfoChip(
-                            label: 'Match',
-                            value: _controller.matchId ?? '-',
-                          ),
-                          _InfoChip(
-                            label: 'You',
-                            value: _controller.myColor == null
-                                ? '-'
-                                : _controller.myColor == 'w'
-                                ? 'White'
-                                : 'Black',
-                          ),
-                          _InfoChip(
-                            label: 'N',
-                            value: '${_controller.cooldownDuration.inSeconds}s',
-                          ),
-                          _InfoChip(
-                            label: 'Turn',
-                            value: _controller.isConnected
-                                ? _controller.turnColor == 'w'
-                                      ? 'White'
-                                      : 'Black'
-                                : '-',
-                          ),
-                          _InfoChip(
-                            label: 'White',
-                            value: _controller.whitePlayerName ?? '-',
-                          ),
-                          _InfoChip(
-                            label: 'Black',
-                            value: _controller.blackPlayerName ?? '-',
-                          ),
-                          _InfoChip(
-                            label: 'Opp Last',
-                            value: _controller.opponentLastMoveLabel ?? '-',
-                          ),
-                          _InfoChip(
-                            label: 'Queue',
-                            value: _controller.queuedMoveLabel ?? '-',
-                          ),
-                        ],
-                      ),
                     ],
                   ),
                 ),
@@ -285,15 +238,13 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                 child: Center(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      const sideBarWidth = 40.0;
-                      const sideGap = 10.0;
-                      final maxBoardWidth =
-                          constraints.maxWidth -
-                          (sideBarWidth * 2) -
-                          (sideGap * 2);
+                      const barHeight = 34.0;
+                      const boardGap = 10.0;
                       final boardSize = math.min(
-                        maxBoardWidth,
-                        constraints.maxHeight,
+                        constraints.maxWidth,
+                        constraints.maxHeight -
+                            (barHeight * 2) -
+                            (boardGap * 2),
                       );
                       if (boardSize <= 0) {
                         return const SizedBox.shrink();
@@ -301,37 +252,70 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
 
                       final whiteRatio = _cooldownRatio(_controller, 'w');
                       final blackRatio = _cooldownRatio(_controller, 'b');
+                      final topColor = _controller.playerColor == 'w'
+                          ? 'b'
+                          : 'w';
+                      final bottomColor = _controller.playerColor;
                       final whiteIsPlayer = _controller.myColor == 'w';
                       final blackIsPlayer = _controller.myColor == 'b';
+                      final topRatio = topColor == 'w'
+                          ? whiteRatio
+                          : blackRatio;
+                      final bottomRatio = bottomColor == 'w'
+                          ? whiteRatio
+                          : blackRatio;
+                      final topRemaining = topColor == 'w'
+                          ? whiteRemaining
+                          : blackRemaining;
+                      final bottomRemaining = bottomColor == 'w'
+                          ? whiteRemaining
+                          : blackRemaining;
+                      final topIsPlayer = topColor == 'w'
+                          ? whiteIsPlayer
+                          : blackIsPlayer;
+                      final bottomIsPlayer = bottomColor == 'w'
+                          ? whiteIsPlayer
+                          : blackIsPlayer;
+                      final topActiveColor = topColor == 'w'
+                          ? const Color(0xFF42A5F5)
+                          : const Color(0xFFFF7043);
+                      final bottomActiveColor = bottomColor == 'w'
+                          ? const Color(0xFF42A5F5)
+                          : const Color(0xFFFF7043);
+                      final topFlashTint = topColor == 'w'
+                          ? const Color(0xFFBBDEFB)
+                          : const Color(0xFFFFCCBC);
+                      final bottomFlashTint = bottomColor == 'w'
+                          ? const Color(0xFFBBDEFB)
+                          : const Color(0xFFFFCCBC);
 
                       return SizedBox(
-                        width: boardSize + (sideBarWidth * 2) + (sideGap * 2),
-                        height: boardSize,
-                        child: Row(
+                        width: boardSize,
+                        height: boardSize + (barHeight * 2) + (boardGap * 2),
+                        child: Column(
                           children: [
                             SizedBox(
-                              width: sideBarWidth,
-                              child: _SideStatusBar(
-                                label: 'W',
-                                ratio: whiteRatio,
-                                activeColor: const Color(0xFF42A5F5),
-                                isPlayerSide: whiteIsPlayer,
+                              height: barHeight,
+                              child: _HorizontalStatusBar(
+                                label: topColor == 'w' ? 'W' : 'B',
+                                ratio: topRatio,
+                                activeColor: topActiveColor,
+                                isPlayerSide: topIsPlayer,
                                 statusLabel: _controller.isMatchActive
-                                    ? _formatDuration(whiteRemaining)
+                                    ? _formatDuration(topRemaining)
                                     : '--',
-                                statusOnTop: !whiteIsPlayer,
                                 readyToFlash:
                                     _controller.isConnected &&
                                     _controller.isMatchActive &&
                                     !_controller.isGameOver &&
-                                    whiteRemaining.inMilliseconds == 0,
-                                flashTint: const Color(0xFFBBDEFB),
+                                    topRemaining.inMilliseconds == 0,
+                                flashTint: topFlashTint,
                                 flashDuration: const Duration(
-                                  milliseconds: 2600,
+                                  milliseconds: 1800,
                                 ),
                               ),
                             ),
-                            const SizedBox(width: sideGap),
+                            const SizedBox(height: boardGap),
                             SizedBox(
                               width: boardSize,
                               height: boardSize,
@@ -409,26 +393,25 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                 ],
                               ),
                             ),
-                            const SizedBox(width: sideGap),
+                            const SizedBox(height: boardGap),
                             SizedBox(
-                              width: sideBarWidth,
-                              child: _SideStatusBar(
-                                label: 'B',
-                                ratio: blackRatio,
-                                activeColor: const Color(0xFFFF7043),
-                                isPlayerSide: blackIsPlayer,
+                              height: barHeight,
+                              child: _HorizontalStatusBar(
+                                label: bottomColor == 'w' ? 'W' : 'B',
+                                ratio: bottomRatio,
+                                activeColor: bottomActiveColor,
+                                isPlayerSide: bottomIsPlayer,
                                 statusLabel: _controller.isMatchActive
-                                    ? _formatDuration(blackRemaining)
+                                    ? _formatDuration(bottomRemaining)
                                     : '--',
-                                statusOnTop: !blackIsPlayer,
                                 readyToFlash:
                                     _controller.isConnected &&
                                     _controller.isMatchActive &&
                                     !_controller.isGameOver &&
-                                    blackRemaining.inMilliseconds == 0,
-                                flashTint: const Color(0xFFFFCCBC),
+                                    bottomRemaining.inMilliseconds == 0,
+                                flashTint: bottomFlashTint,
                                 flashDuration: const Duration(
-                                  milliseconds: 3200,
+                                  milliseconds: 1800,
                                 ),
                               ),
                             ),
@@ -516,38 +499,13 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
   }
 }
 
-class _InfoChip extends StatelessWidget {
-  const _InfoChip({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFEFE7DD),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        child: Text(
-          '$label: $value',
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-      ),
-    );
-  }
-}
-
-class _SideStatusBar extends StatefulWidget {
-  const _SideStatusBar({
+class _HorizontalStatusBar extends StatefulWidget {
+  const _HorizontalStatusBar({
     required this.label,
     required this.ratio,
     required this.activeColor,
     required this.isPlayerSide,
     required this.statusLabel,
-    required this.statusOnTop,
     required this.readyToFlash,
     required this.flashTint,
     required this.flashDuration,
@@ -558,24 +516,45 @@ class _SideStatusBar extends StatefulWidget {
   final Color activeColor;
   final bool isPlayerSide;
   final String statusLabel;
-  final bool statusOnTop;
   final bool readyToFlash;
   final Color flashTint;
   final Duration flashDuration;
 
   @override
-  State<_SideStatusBar> createState() => _SideStatusBarState();
+  State<_HorizontalStatusBar> createState() => _HorizontalStatusBarState();
 }
 
-class _SideStatusBarState extends State<_SideStatusBar>
+class _HorizontalStatusBarState extends State<_HorizontalStatusBar>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulse;
 
   @override
   void initState() {
     super.initState();
-    _pulse = AnimationController(vsync: this, duration: widget.flashDuration)
-      ..repeat(reverse: true);
+    _pulse = AnimationController(vsync: this, duration: widget.flashDuration);
+    _syncPulse();
+  }
+
+  @override
+  void didUpdateWidget(covariant _HorizontalStatusBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.flashDuration != widget.flashDuration) {
+      _pulse.duration = widget.flashDuration;
+    }
+    _syncPulse();
+  }
+
+  void _syncPulse() {
+    if (widget.readyToFlash) {
+      if (!_pulse.isAnimating) {
+        _pulse.repeat(reverse: true);
+      }
+      return;
+    }
+    if (_pulse.isAnimating) {
+      _pulse.stop();
+    }
+    _pulse.value = 0;
   }
 
   @override
@@ -589,127 +568,103 @@ class _SideStatusBarState extends State<_SideStatusBar>
     final ready = widget.ratio == 0;
     final fillColor = ready ? const Color(0xFF43A047) : widget.activeColor;
 
-    return Column(
-      children: [
-        if (widget.statusOnTop)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Text(
-              widget.statusLabel,
-              style: const TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 11,
-                color: Color(0xFF1A1A1A),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFDED6CB),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: Padding(
+              padding: const EdgeInsets.all(3),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: DecoratedBox(
+                  decoration: const BoxDecoration(color: Color(0xFF9E9489)),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween<double>(begin: 0, end: widget.ratio),
+                      duration: const Duration(milliseconds: 280),
+                      curve: Curves.easeOutCubic,
+                      builder: (context, value, _) {
+                        return FractionallySizedBox(
+                          heightFactor: 1,
+                          widthFactor: value,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.centerLeft,
+                                end: Alignment.centerRight,
+                                colors: [
+                                  fillColor.withValues(alpha: 0.55),
+                                  fillColor.withValues(alpha: 0.95),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
-        Expanded(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: const Color(0xFFDED6CB),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: Padding(
-                    padding: const EdgeInsets.all(3),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: DecoratedBox(
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF9E9489),
-                        ),
-                        child: Align(
-                          alignment: Alignment.bottomCenter,
-                          child: TweenAnimationBuilder<double>(
-                            tween: Tween<double>(begin: 0, end: widget.ratio),
-                            duration: const Duration(milliseconds: 160),
-                            builder: (context, value, _) {
-                              return FractionallySizedBox(
-                                heightFactor: value,
-                                widthFactor: 1,
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      begin: Alignment.bottomCenter,
-                                      end: Alignment.topCenter,
-                                      colors: [
-                                        fillColor.withValues(alpha: 0.95),
-                                        fillColor.withValues(alpha: 0.55),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
+          if (widget.readyToFlash)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AnimatedBuilder(
+                  animation: _pulse,
+                  builder: (context, _) {
+                    final opacity = 0.18 + (0.34 * _pulse.value);
+                    return DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        color: widget.flashTint.withValues(alpha: opacity),
                       ),
-                    ),
-                  ),
+                    );
+                  },
                 ),
-                if (widget.readyToFlash)
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: AnimatedBuilder(
-                        animation: _pulse,
-                        builder: (context, _) {
-                          final opacity = 0.08 + (0.2 * _pulse.value);
-                          return DecoratedBox(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(10),
-                              color: widget.flashTint.withValues(
-                                alpha: opacity,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                Positioned(
-                  top: 6,
-                  left: 0,
-                  right: 0,
-                  child: Text(
+              ),
+            ),
+          Positioned.fill(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Row(
+                children: [
+                  Text(
                     widget.label,
-                    textAlign: TextAlign.center,
                     style: const TextStyle(
                       fontWeight: FontWeight.w800,
-                      fontSize: 11,
+                      fontSize: 12,
                       color: Color(0xFF1A1A1A),
                     ),
                   ),
-                ),
-                if (widget.isPlayerSide)
-                  const Positioned(
-                    bottom: 6,
-                    left: 0,
-                    right: 0,
-                    child: Icon(
+                  if (widget.isPlayerSide) ...[
+                    const SizedBox(width: 4),
+                    const Icon(
                       Icons.person,
                       size: 12,
                       color: Color(0xFF1A1A1A),
                     ),
+                  ],
+                  const Spacer(),
+                  Text(
+                    widget.statusLabel,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      color: Color(0xFF1A1A1A),
+                    ),
                   ),
-              ],
-            ),
-          ),
-        ),
-        if (!widget.statusOnTop)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              widget.statusLabel,
-              style: const TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 11,
-                color: Color(0xFF1A1A1A),
+                ],
               ),
             ),
           ),
-      ],
+        ],
+      ),
     );
   }
 }

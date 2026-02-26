@@ -46,7 +46,6 @@ class _GameScreenState extends State<GameScreen> {
       animation: _controller,
       builder: (context, _) {
         return Scaffold(
-          appBar: AppBar(title: const Text('Bullethole Chess MVP')),
           body: SafeArea(
             child: Column(
               children: [
@@ -224,25 +223,6 @@ class _GameScreenState extends State<GameScreen> {
                       ),
                     ),
                   ],
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _InfoChip(
-                        label: 'Version',
-                        value: _controller.version.toString(),
-                      ),
-                      _InfoChip(
-                        label: 'N',
-                        value: '${_controller.cooldownDuration.inSeconds}s',
-                      ),
-                      _InfoChip(
-                        label: 'Opp Last',
-                        value: _controller.opponentLastMoveLabel ?? '-',
-                      ),
-                    ],
-                  ),
                 ],
               ),
             ),
@@ -252,13 +232,11 @@ class _GameScreenState extends State<GameScreen> {
             child: Center(
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  const sideBarWidth = 40.0;
-                  const sideGap = 10.0;
-                  final maxBoardWidth =
-                      constraints.maxWidth - (sideBarWidth * 2) - (sideGap * 2);
+                  const barHeight = 34.0;
+                  const boardGap = 10.0;
                   final boardSize = math.min(
-                    maxBoardWidth,
-                    constraints.maxHeight,
+                    constraints.maxWidth,
+                    constraints.maxHeight - (barHeight * 2) - (boardGap * 2),
                   );
                   if (boardSize <= 0) {
                     return const SizedBox.shrink();
@@ -266,34 +244,63 @@ class _GameScreenState extends State<GameScreen> {
 
                   final whiteRatio = _cooldownRatio(_controller, 'w');
                   final blackRatio = _cooldownRatio(_controller, 'b');
+                  final topColor = _controller.playerColor == 'w' ? 'b' : 'w';
+                  final bottomColor = _controller.playerColor;
                   final whiteIsPlayer = _controller.playerColor == 'w';
                   final blackIsPlayer = _controller.playerColor == 'b';
+                  final topRatio = topColor == 'w' ? whiteRatio : blackRatio;
+                  final bottomRatio = bottomColor == 'w'
+                      ? whiteRatio
+                      : blackRatio;
+                  final topRemaining = topColor == 'w'
+                      ? whiteRemaining
+                      : blackRemaining;
+                  final bottomRemaining = bottomColor == 'w'
+                      ? whiteRemaining
+                      : blackRemaining;
+                  final topIsPlayer = topColor == 'w'
+                      ? whiteIsPlayer
+                      : blackIsPlayer;
+                  final bottomIsPlayer = bottomColor == 'w'
+                      ? whiteIsPlayer
+                      : blackIsPlayer;
+                  final topActiveColor = topColor == 'w'
+                      ? const Color(0xFF42A5F5)
+                      : const Color(0xFFFF7043);
+                  final bottomActiveColor = bottomColor == 'w'
+                      ? const Color(0xFF42A5F5)
+                      : const Color(0xFFFF7043);
+                  final topFlashTint = topColor == 'w'
+                      ? const Color(0xFFBBDEFB)
+                      : const Color(0xFFFFCCBC);
+                  final bottomFlashTint = bottomColor == 'w'
+                      ? const Color(0xFFBBDEFB)
+                      : const Color(0xFFFFCCBC);
 
                   return SizedBox(
-                    width: boardSize + (sideBarWidth * 2) + (sideGap * 2),
-                    height: boardSize,
-                    child: Row(
+                    width: boardSize,
+                    height: boardSize + (barHeight * 2) + (boardGap * 2),
+                    child: Column(
                       children: [
                         SizedBox(
-                          width: sideBarWidth,
-                          child: _SideCooldownBar(
-                            key: const ValueKey('w_bar'),
-                            label: 'W',
-                            ratio: whiteRatio,
-                            activeColor: const Color(0xFF42A5F5),
-                            isPlayerSide: whiteIsPlayer,
+                          height: barHeight,
+                          child: _HorizontalCooldownBar(
+                            key: const ValueKey('top_bar'),
+                            label: topColor == 'w' ? 'W' : 'B',
+                            ratio: topRatio,
+                            activeColor: topActiveColor,
+                            isPlayerSide: topIsPlayer,
                             timerLabel: _controller.hasActiveGame
-                                ? _formatDuration(whiteRemaining)
+                                ? _formatDuration(topRemaining)
                                 : '--',
-                            timerOnTop: !whiteIsPlayer,
                             readyToFlash:
                                 _controller.hasActiveGame &&
-                                whiteRemaining.inMilliseconds == 0,
-                            flashTint: const Color(0xFFBBDEFB),
-                            flashDuration: const Duration(milliseconds: 2600),
+                                topRemaining.inMilliseconds == 0,
+                            flashTint: topFlashTint,
+                            flashDuration: const Duration(milliseconds: 1800),
                           ),
                         ),
-                        const SizedBox(width: sideGap),
+                        const SizedBox(height: boardGap),
                         SizedBox(
                           width: boardSize,
                           height: boardSize,
@@ -321,7 +328,9 @@ class _GameScreenState extends State<GameScreen> {
                                 Positioned.fill(
                                   child: DecoratedBox(
                                     decoration: BoxDecoration(
-                                      color: Colors.black.withValues(alpha: 0.2),
+                                      color: Colors.black.withValues(
+                                        alpha: 0.2,
+                                      ),
                                     ),
                                     child: Center(
                                       child: FilledButton.icon(
@@ -335,24 +344,23 @@ class _GameScreenState extends State<GameScreen> {
                             ],
                           ),
                         ),
-                        const SizedBox(width: sideGap),
+                        const SizedBox(height: boardGap),
                         SizedBox(
-                          width: sideBarWidth,
-                          child: _SideCooldownBar(
-                            key: const ValueKey('b_bar'),
-                            label: 'B',
-                            ratio: blackRatio,
-                            activeColor: const Color(0xFFFF7043),
-                            isPlayerSide: blackIsPlayer,
+                          height: barHeight,
+                          child: _HorizontalCooldownBar(
+                            key: const ValueKey('bottom_bar'),
+                            label: bottomColor == 'w' ? 'W' : 'B',
+                            ratio: bottomRatio,
+                            activeColor: bottomActiveColor,
+                            isPlayerSide: bottomIsPlayer,
                             timerLabel: _controller.hasActiveGame
-                                ? _formatDuration(blackRemaining)
+                                ? _formatDuration(bottomRemaining)
                                 : '--',
-                            timerOnTop: !blackIsPlayer,
                             readyToFlash:
                                 _controller.hasActiveGame &&
-                                blackRemaining.inMilliseconds == 0,
-                            flashTint: const Color(0xFFFFCCBC),
-                            flashDuration: const Duration(milliseconds: 3200),
+                                bottomRemaining.inMilliseconds == 0,
+                            flashTint: bottomFlashTint,
+                            flashDuration: const Duration(milliseconds: 1800),
                           ),
                         ),
                       ],
@@ -463,38 +471,13 @@ class _GameScreenState extends State<GameScreen> {
   }
 }
 
-class _InfoChip extends StatelessWidget {
-  const _InfoChip({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFFEFE7DD),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        child: Text(
-          '$label: $value',
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-      ),
-    );
-  }
-}
-
-class _SideCooldownBar extends StatefulWidget {
-  const _SideCooldownBar({
+class _HorizontalCooldownBar extends StatefulWidget {
+  const _HorizontalCooldownBar({
     required this.label,
     required this.ratio,
     required this.activeColor,
     required this.isPlayerSide,
     required this.timerLabel,
-    required this.timerOnTop,
     required this.readyToFlash,
     required this.flashTint,
     required this.flashDuration,
@@ -506,24 +489,45 @@ class _SideCooldownBar extends StatefulWidget {
   final Color activeColor;
   final bool isPlayerSide;
   final String timerLabel;
-  final bool timerOnTop;
   final bool readyToFlash;
   final Color flashTint;
   final Duration flashDuration;
 
   @override
-  State<_SideCooldownBar> createState() => _SideCooldownBarState();
+  State<_HorizontalCooldownBar> createState() => _HorizontalCooldownBarState();
 }
 
-class _SideCooldownBarState extends State<_SideCooldownBar>
+class _HorizontalCooldownBarState extends State<_HorizontalCooldownBar>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulse;
 
   @override
   void initState() {
     super.initState();
-    _pulse = AnimationController(vsync: this, duration: widget.flashDuration)
-      ..repeat(reverse: true);
+    _pulse = AnimationController(vsync: this, duration: widget.flashDuration);
+    _syncPulse();
+  }
+
+  @override
+  void didUpdateWidget(covariant _HorizontalCooldownBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.flashDuration != widget.flashDuration) {
+      _pulse.duration = widget.flashDuration;
+    }
+    _syncPulse();
+  }
+
+  void _syncPulse() {
+    if (widget.readyToFlash) {
+      if (!_pulse.isAnimating) {
+        _pulse.repeat(reverse: true);
+      }
+      return;
+    }
+    if (_pulse.isAnimating) {
+      _pulse.stop();
+    }
+    _pulse.value = 0;
   }
 
   @override
@@ -537,123 +541,103 @@ class _SideCooldownBarState extends State<_SideCooldownBar>
     final ready = widget.ratio == 0;
     final fillColor = ready ? const Color(0xFF43A047) : widget.activeColor;
 
-    return Column(
-      children: [
-        if (widget.timerOnTop)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Text(
-              widget.timerLabel,
-              style: const TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 11,
-                color: Color(0xFF1A1A1A),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFDED6CB),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: Padding(
+              padding: const EdgeInsets.all(3),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: DecoratedBox(
+                  decoration: const BoxDecoration(color: Color(0xFF9E9489)),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween<double>(begin: 0, end: widget.ratio),
+                      duration: const Duration(milliseconds: 280),
+                      curve: Curves.easeOutCubic,
+                      builder: (context, value, _) {
+                        return FractionallySizedBox(
+                          heightFactor: 1,
+                          widthFactor: value,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.centerLeft,
+                                end: Alignment.centerRight,
+                                colors: [
+                                  fillColor.withValues(alpha: 0.55),
+                                  fillColor.withValues(alpha: 0.95),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
-        Expanded(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: const Color(0xFFDED6CB),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: Padding(
-                    padding: const EdgeInsets.all(3),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: DecoratedBox(
-                        decoration: const BoxDecoration(color: Color(0xFF9E9489)),
-                        child: Align(
-                          alignment: Alignment.bottomCenter,
-                          child: TweenAnimationBuilder<double>(
-                            tween: Tween<double>(begin: 0, end: widget.ratio),
-                            duration: const Duration(milliseconds: 160),
-                            builder: (context, value, _) {
-                              return FractionallySizedBox(
-                                heightFactor: value,
-                                widthFactor: 1,
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      begin: Alignment.bottomCenter,
-                                      end: Alignment.topCenter,
-                                      colors: [
-                                        fillColor.withValues(alpha: 0.95),
-                                        fillColor.withValues(alpha: 0.55),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
+          if (widget.readyToFlash)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AnimatedBuilder(
+                  animation: _pulse,
+                  builder: (context, _) {
+                    final opacity = 0.18 + (0.34 * _pulse.value);
+                    return DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        color: widget.flashTint.withValues(alpha: opacity),
                       ),
-                    ),
-                  ),
+                    );
+                  },
                 ),
-                if (widget.readyToFlash)
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: AnimatedBuilder(
-                        animation: _pulse,
-                        builder: (context, _) {
-                          final opacity = 0.08 + (0.2 * _pulse.value);
-                          return DecoratedBox(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(10),
-                              color: widget.flashTint.withValues(alpha: opacity),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                Positioned(
-                  top: 6,
-                  left: 0,
-                  right: 0,
-                  child: Text(
+              ),
+            ),
+          Positioned.fill(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Row(
+                children: [
+                  Text(
                     widget.label,
-                    textAlign: TextAlign.center,
                     style: const TextStyle(
                       fontWeight: FontWeight.w800,
-                      fontSize: 11,
+                      fontSize: 12,
                       color: Color(0xFF1A1A1A),
                     ),
                   ),
-                ),
-                if (widget.isPlayerSide)
-                  const Positioned(
-                    bottom: 6,
-                    left: 0,
-                    right: 0,
-                    child: Icon(
+                  if (widget.isPlayerSide) ...[
+                    const SizedBox(width: 4),
+                    const Icon(
                       Icons.person,
                       size: 12,
                       color: Color(0xFF1A1A1A),
                     ),
+                  ],
+                  const Spacer(),
+                  Text(
+                    widget.timerLabel,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      color: Color(0xFF1A1A1A),
+                    ),
                   ),
-              ],
-            ),
-          ),
-        ),
-        if (!widget.timerOnTop)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              widget.timerLabel,
-              style: const TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 11,
-                color: Color(0xFF1A1A1A),
+                ],
               ),
             ),
           ),
-      ],
+        ],
+      ),
     );
   }
 }
