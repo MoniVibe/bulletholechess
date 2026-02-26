@@ -17,6 +17,7 @@ const MAX_COOLDOWN_SECONDS = 30;
 const MATCH_TTL_MS = Number.parseInt(process.env.MATCH_TTL_MS || '0', 10);
 const MATCH_TIMEOUT_ENABLED =
   Number.isFinite(MATCH_TTL_MS) && MATCH_TTL_MS > 0;
+const MAX_SERVER_LOGS = Number.parseInt(process.env.MAX_SERVER_LOGS || '500', 10);
 
 const app = express();
 app.use(cors());
@@ -24,9 +25,42 @@ app.use(express.json({ limit: '32kb' }));
 app.options('*', cors());
 
 const matches = new Map();
+const serverLogs = [];
+let logSequence = 0;
 
 app.get('/healthz', (_req, res) => {
   res.json({ ok: true, at: new Date().toISOString() });
+});
+
+app.get('/debug/logs', (req, res) => {
+  const limitRaw = Number.parseInt(String(req.query.limit ?? '100'), 10);
+  const limit = Number.isFinite(limitRaw)
+    ? Math.min(Math.max(limitRaw, 1), 1000)
+    : 100;
+  const matchIdFilter =
+    typeof req.query.matchId === 'string' ? req.query.matchId.trim() : '';
+  const eventFilter =
+    typeof req.query.event === 'string' ? req.query.event.trim() : '';
+  const levelFilter =
+    typeof req.query.level === 'string' ? req.query.level.trim() : '';
+
+  let items = [...serverLogs];
+  if (matchIdFilter) {
+    items = items.filter((entry) => entry.matchId === matchIdFilter);
+  }
+  if (eventFilter) {
+    items = items.filter((entry) => entry.event === eventFilter);
+  }
+  if (levelFilter) {
+    items = items.filter((entry) => entry.level === levelFilter);
+  }
+
+  const sliced = items.slice(-limit);
+  res.json({
+    count: serverLogs.length,
+    returned: sliced.length,
+    items: sliced,
+  });
 });
 
 app.post('/api/matches/create', (req, res) => {
@@ -46,6 +80,11 @@ wss.on('connection', (socket, req) => {
   const playerId = url.searchParams.get('playerId');
 
   if (!matchId || !playerId) {
+    logEvent('ws_connect_rejected', {
+      reason: 'missing_parameters',
+      matchId,
+      playerId,
+    });
     sendJson(socket, {
       type: 'error',
       message: 'matchId and playerId are required.',
@@ -56,6 +95,11 @@ wss.on('connection', (socket, req) => {
 
   const match = matches.get(matchId);
   if (!match || isExpired(match)) {
+    logEvent('ws_connect_rejected', {
+      reason: 'match_unavailable',
+      matchId,
+      playerId,
+    });
     cleanupMatch(matchId, {
       notifyMessage: 'Match expired.',
       closeReason: 'Match expired',
@@ -67,6 +111,11 @@ wss.on('connection', (socket, req) => {
 
   const color = match.playersById.get(playerId);
   if (!color) {
+    logEvent('ws_connect_rejected', {
+      reason: 'invalid_player_session',
+      matchId,
+      playerId,
+    });
     sendJson(socket, { type: 'error', message: 'Invalid player session.' });
     socket.close(1008, 'Invalid player');
     return;
@@ -74,6 +123,12 @@ wss.on('connection', (socket, req) => {
 
   const player = playerForColor(match, color);
   if (!player || player.playerId !== playerId) {
+    logEvent('ws_connect_rejected', {
+      reason: 'player_slot_unavailable',
+      matchId,
+      playerId,
+      color,
+    });
     sendJson(socket, { type: 'error', message: 'Player slot unavailable.' });
     socket.close(1008, 'Player unavailable');
     return;
@@ -85,6 +140,15 @@ wss.on('connection', (socket, req) => {
 
   player.socket = socket;
   match.updatedAt = Date.now();
+  logEvent('ws_connected', {
+    matchId,
+    playerId,
+    color,
+    players: {
+      w: match.players.white?.name ?? null,
+      b: match.players.black?.name ?? null,
+    },
+  });
 
   sendJson(socket, {
     type: 'welcome',
@@ -101,11 +165,21 @@ wss.on('connection', (socket, req) => {
     try {
       payload = JSON.parse(raw.toString('utf8'));
     } catch (_error) {
+      logEvent('ws_invalid_json', {
+        matchId: match.matchId,
+        playerId,
+        color,
+      });
       sendJson(socket, { type: 'error', message: 'Invalid JSON payload.' });
       return;
     }
 
     if (!payload || typeof payload !== 'object') {
+      logEvent('ws_invalid_payload', {
+        matchId: match.matchId,
+        playerId,
+        color,
+      });
       sendJson(socket, { type: 'error', message: 'Invalid payload.' });
       return;
     }
@@ -128,9 +202,22 @@ wss.on('connection', (socket, req) => {
     match.updatedAt = now;
 
     if (!match.players.white && !match.players.black) {
+      logEvent('ws_disconnected', {
+        matchId: match.matchId,
+        playerId,
+        color,
+        removedMatch: true,
+      });
       cleanupMatch(matchId);
       return;
     }
+
+    logEvent('ws_disconnected', {
+      matchId: match.matchId,
+      playerId,
+      color,
+      removedMatch: false,
+    });
 
     broadcastToConnected(match, {
       type: 'opponent_left',
@@ -148,6 +235,7 @@ if (MATCH_TIMEOUT_ENABLED) {
 
 server.listen(PORT, BIND, () => {
   console.log(`Bullethole backend listening on http://${BIND}:${PORT}`);
+  logEvent('server_started', { bind: BIND, port: PORT });
 });
 
 function joinOrCreate(req, res) {
@@ -163,6 +251,14 @@ function joinOrCreate(req, res) {
 
   pruneExpiredMatches();
   const assignment = assignPlayerToMatch(name, requestedCooldownSeconds);
+  logEvent('match_join_or_create', {
+    matchId: assignment.match.matchId,
+    playerId: assignment.playerId,
+    color: assignment.color,
+    created: assignment.created,
+    cooldownSeconds: Math.round(assignment.match.cooldownMs / 1000),
+    playerName: name,
+  });
   const status = assignment.created ? 201 : 200;
   res.status(status).json({
     matchId: assignment.match.matchId,
@@ -260,13 +356,46 @@ function handleSocketMessage({ match, color, socket, payload }) {
   const type = typeof payload.type === 'string' ? payload.type : '';
   switch (type) {
     case 'move': {
+      const attemptedFrom = sanitizeSquare(payload.from);
+      const attemptedTo = sanitizeSquare(payload.to);
+      const attemptedPromotion = sanitizePromotion(payload.promotion);
+      const clientMoveId = sanitizeMoveId(payload.clientMoveId);
+      const source = sanitizeMoveSource(payload.source);
+      const queueToken = sanitizeMoveId(payload.queueToken);
+      const player = playerForColor(match, color);
+      const playerId = player?.playerId ?? null;
+      logEvent('move_attempt', {
+        matchId: match.matchId,
+        color,
+        playerId,
+        from: attemptedFrom,
+        to: attemptedTo,
+        promotion: attemptedPromotion,
+        clientMoveId,
+        source,
+        queueToken,
+      });
+
       if (!match.players.white || !match.players.black) {
+        logEvent('move_rejected', {
+          matchId: match.matchId,
+          color,
+          playerId,
+          reason: 'waiting_for_opponent',
+        });
         sendJson(socket, { type: 'error', message: 'Waiting for opponent.' });
         return;
       }
 
       const terminal = getTerminalStatus(match.game);
       if (terminal.gameOver) {
+        logEvent('move_rejected', {
+          matchId: match.matchId,
+          color,
+          playerId,
+          reason: 'game_over',
+          result: terminal.result,
+        });
         sendJson(socket, {
           type: 'error',
           message: 'Game over. Start a new game.',
@@ -277,6 +406,13 @@ function handleSocketMessage({ match, color, socket, payload }) {
       const now = Date.now();
       const readyAt = match.cooldownEndsAt[color] || 0;
       if (now < readyAt) {
+        logEvent('move_rejected', {
+          matchId: match.matchId,
+          color,
+          playerId,
+          reason: 'cooldown_active',
+          remainingMs: readyAt - now,
+        });
         sendJson(socket, {
           type: 'error',
           message: `Cooldown active for ${readyAt - now}ms.`,
@@ -289,6 +425,12 @@ function handleSocketMessage({ match, color, socket, payload }) {
       }
 
       if (!hasAnyLegalMoveForColor(match.game, color)) {
+        logEvent('move_rejected', {
+          matchId: match.matchId,
+          color,
+          playerId,
+          reason: 'no_legal_moves',
+        });
         sendJson(socket, {
           type: 'error',
           message: 'No legal moves available.',
@@ -296,13 +438,84 @@ function handleSocketMessage({ match, color, socket, payload }) {
         return;
       }
 
-      const from = sanitizeSquare(payload.from);
-      const to = sanitizeSquare(payload.to);
-      const promotion = sanitizePromotion(payload.promotion);
+      const from = attemptedFrom;
+      const to = attemptedTo;
+      const promotion = attemptedPromotion;
       if (!from || !to) {
+        logEvent('move_rejected', {
+          matchId: match.matchId,
+          color,
+          playerId,
+          reason: 'invalid_coordinates',
+          from: payload.from,
+          to: payload.to,
+        });
         sendJson(socket, {
           type: 'error',
           message: 'Invalid move coordinates.',
+        });
+        return;
+      }
+
+      const board = boardPiecesFromFen(match.game.fen());
+      const fromPiece = board[from] || null;
+      const toPiece = board[to] || null;
+      if (!fromPiece) {
+        logEvent('move_rejected', {
+          matchId: match.matchId,
+          color,
+          playerId,
+          clientMoveId,
+          source,
+          queueToken,
+          reason: 'from_square_empty',
+          from,
+          to,
+        });
+        sendJson(socket, {
+          type: 'error',
+          code: 'from_square_empty',
+          message: 'No piece at from-square.',
+        });
+        return;
+      }
+      if (!pieceBelongsToColor(fromPiece, color)) {
+        logEvent('move_rejected', {
+          matchId: match.matchId,
+          color,
+          playerId,
+          clientMoveId,
+          source,
+          queueToken,
+          reason: 'piece_not_owned',
+          from,
+          to,
+          fromPiece,
+        });
+        sendJson(socket, {
+          type: 'error',
+          code: 'piece_not_owned',
+          message: 'Cannot move an opponent piece.',
+        });
+        return;
+      }
+      if (toPiece && pieceBelongsToColor(toPiece, color)) {
+        logEvent('move_rejected', {
+          matchId: match.matchId,
+          color,
+          playerId,
+          clientMoveId,
+          source,
+          queueToken,
+          reason: 'destination_occupied_by_own_piece',
+          from,
+          to,
+          toPiece,
+        });
+        sendJson(socket, {
+          type: 'error',
+          code: 'destination_occupied_by_own_piece',
+          message: 'Cannot capture your own piece.',
         });
         return;
       }
@@ -315,6 +528,18 @@ function handleSocketMessage({ match, color, socket, payload }) {
         color,
       });
       if (!legalMove) {
+        logEvent('move_rejected', {
+          matchId: match.matchId,
+          color,
+          playerId,
+          clientMoveId,
+          source,
+          queueToken,
+          reason: 'illegal_move',
+          from,
+          to,
+          promotion,
+        });
         sendJson(socket, { type: 'error', message: 'Illegal move.' });
         return;
       }
@@ -323,16 +548,46 @@ function handleSocketMessage({ match, color, socket, payload }) {
         match.game.move({ from, to, promotion }),
       );
       if (!moved) {
+        logEvent('move_rejected', {
+          matchId: match.matchId,
+          color,
+          playerId,
+          clientMoveId,
+          source,
+          queueToken,
+          reason: 'move_apply_failed',
+          from,
+          to,
+          promotion,
+        });
         sendJson(socket, { type: 'error', message: 'Illegal move.' });
         return;
       }
 
       setCooldownForMover(match, color, now);
       match.updatedAt = now;
+      logEvent('move_accepted', {
+        matchId: match.matchId,
+        color,
+        playerId,
+        clientMoveId,
+        source,
+        queueToken,
+        from,
+        to,
+        promotion,
+        cooldownEndsAt: {
+          w: match.cooldownEndsAt.w,
+          b: match.cooldownEndsAt.b,
+        },
+      });
       broadcastState(match, {
         from,
         to,
         promotion,
+        clientMoveId,
+        source,
+        queueToken,
       });
       return;
     }
@@ -341,12 +596,20 @@ function handleSocketMessage({ match, color, socket, payload }) {
       if (requestedCooldown != null) {
         match.cooldownMs = requestedCooldown * 1000;
       }
+      const player = playerForColor(match, color);
+      const playerId = player?.playerId ?? null;
 
       match.game = new Chess();
       const now = Date.now();
       match.cooldownEndsAt.w = now;
       match.cooldownEndsAt.b = now;
       match.updatedAt = now;
+      logEvent('new_game', {
+        matchId: match.matchId,
+        requestedByColor: color,
+        requestedByPlayerId: playerId,
+        cooldownSeconds: Math.round(match.cooldownMs / 1000),
+      });
       broadcastState(match);
       return;
     }
@@ -354,6 +617,12 @@ function handleSocketMessage({ match, color, socket, payload }) {
       sendJson(socket, { type: 'pong', at: new Date().toISOString() });
       return;
     default:
+      logEvent('message_rejected', {
+        matchId: match.matchId,
+        color,
+        reason: 'unknown_message_type',
+        type,
+      });
       sendJson(socket, {
         type: 'error',
         message: `Unknown message type: ${type}`,
@@ -446,6 +715,11 @@ function cleanupMatch(matchId, options = {}) {
     p.socket.close(closeCode, closeReason);
   }
 
+  logEvent('match_cleaned_up', {
+    matchId,
+    notifyMessage,
+    closeReason,
+  });
   matches.delete(matchId);
 }
 
@@ -567,6 +841,58 @@ function sanitizePromotion(value) {
   return ['q', 'r', 'b', 'n'].includes(text) ? text : 'q';
 }
 
+function sanitizeMoveId(value) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
+
+function sanitizeMoveSource(value) {
+  if (value === 'manual' || value === 'queued') {
+    return value;
+  }
+  return 'unknown';
+}
+
+function pieceBelongsToColor(piece, color) {
+  if (typeof piece !== 'string' || piece.length === 0) {
+    return false;
+  }
+  const isWhitePiece = piece === piece.toUpperCase();
+  return color === 'w' ? isWhitePiece : !isWhitePiece;
+}
+
+function boardPiecesFromFen(fen) {
+  if (typeof fen !== 'string' || fen.length === 0) {
+    return {};
+  }
+  const files = 'abcdefgh';
+  const boardPart = fen.split(' ')[0];
+  const rows = boardPart.split('/');
+  const board = {};
+
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex];
+    let fileIndex = 0;
+    for (const symbol of row.split('')) {
+      const emptyCount = Number.parseInt(symbol, 10);
+      if (Number.isFinite(emptyCount)) {
+        fileIndex += emptyCount;
+        continue;
+      }
+      if (fileIndex >= 0 && fileIndex < files.length) {
+        const square = `${files[fileIndex]}${8 - rowIndex}`;
+        board[square] = symbol;
+      }
+      fileIndex += 1;
+    }
+  }
+
+  return board;
+}
+
 function isExpired(match) {
   if (!MATCH_TIMEOUT_ENABLED) {
     return false;
@@ -576,4 +902,44 @@ function isExpired(match) {
 
 function sendJson(socket, payload) {
   socket.send(JSON.stringify(payload));
+}
+
+function logEvent(event, data = {}, level = 'info') {
+  const entry = {
+    id: ++logSequence,
+    at: new Date().toISOString(),
+    level,
+    event,
+    ...sanitizeLogData(data),
+  };
+  serverLogs.push(entry);
+  while (serverLogs.length > MAX_SERVER_LOGS) {
+    serverLogs.shift();
+  }
+  if (level === 'error') {
+    console.error(JSON.stringify(entry));
+  } else {
+    console.log(JSON.stringify(entry));
+  }
+}
+
+function sanitizeLogData(data) {
+  if (!data || typeof data !== 'object') {
+    return {};
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value === undefined) {
+      continue;
+    }
+    if (typeof value === 'function') {
+      continue;
+    }
+    if (value && typeof value === 'object') {
+      out[key] = JSON.parse(JSON.stringify(value));
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
 }

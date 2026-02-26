@@ -11,6 +11,22 @@ flutter pub get
 flutter run
 ```
 
+### Windows quick launch (double-click)
+
+- Double-click `launch-dev.cmd` from the repo root.
+- It opens:
+  - backend (`multiplayer_node_server`, `npm start`)
+  - app (`flutter run -d windows` with `DEFAULT_BACKEND_URL=http://localhost:8080`)
+
+Optional CLI usage:
+
+```powershell
+.\launch-dev.ps1
+.\launch-dev.ps1 -Device chrome
+.\launch-dev.ps1 -BackendUrl https://your-backend.example.com -SkipBackend
+.\launch-dev.ps1 -DryRun
+```
+
 ## Seamless Cross-Continent Multiplayer (Prototype)
 
 Use the Node backend in `multiplayer_node_server/` and deploy it to one public HTTPS URL.
