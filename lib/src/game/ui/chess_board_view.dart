@@ -10,6 +10,11 @@ class ChessBoardView extends StatelessWidget {
     this.lastMoveFrom,
     this.lastMoveTo,
     this.lastMoveHighlightColor = const Color(0xFFD7CA64),
+    this.secondaryMoveFrom,
+    this.secondaryMoveTo,
+    this.secondaryMoveHighlightColor = const Color(0xFFE57373),
+    this.queuedMoveFrom,
+    this.queuedMoveTo,
     super.key,
   });
 
@@ -20,6 +25,11 @@ class ChessBoardView extends StatelessWidget {
   final String? lastMoveFrom;
   final String? lastMoveTo;
   final Color lastMoveHighlightColor;
+  final String? secondaryMoveFrom;
+  final String? secondaryMoveTo;
+  final Color secondaryMoveHighlightColor;
+  final String? queuedMoveFrom;
+  final String? queuedMoveTo;
   final ValueChanged<String> onSquareTap;
 
   static const _files = 'abcdefgh';
@@ -54,15 +64,29 @@ class ChessBoardView extends StatelessWidget {
             final isDarkSquare = (row + col).isOdd;
             final isSelected = selectedSquare == square;
             final isTarget = legalTargets.contains(square);
-            final isLastMoveSquare =
+            final isPrimaryMoveSquare =
                 square == lastMoveFrom || square == lastMoveTo;
+            final isSecondaryMoveSquare =
+                square == secondaryMoveFrom || square == secondaryMoveTo;
+            final isQueuedSquare =
+                square == queuedMoveFrom || square == queuedMoveTo;
 
             final baseColor = isDarkSquare
                 ? const Color(0xFF8D6E63)
                 : const Color(0xFFE8D7C7);
-            final squareColor = isLastMoveSquare
-                ? lastMoveHighlightColor
-                : baseColor;
+            Color squareColor = baseColor;
+            if (isPrimaryMoveSquare) {
+              squareColor = lastMoveHighlightColor;
+            }
+            if (isSecondaryMoveSquare) {
+              squareColor = isPrimaryMoveSquare
+                  ? Color.lerp(
+                      lastMoveHighlightColor,
+                      secondaryMoveHighlightColor,
+                      0.5,
+                    )!
+                  : secondaryMoveHighlightColor;
+            }
 
             return Material(
               color: squareColor,
@@ -103,6 +127,20 @@ class ChessBoardView extends StatelessWidget {
                                   ),
                                 ),
                               ),
+                      ),
+                    if (isQueuedSquare)
+                      Positioned.fill(
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: const Color(0xFF006064),
+                                width: 2,
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
                     if (piece != null)
                       Center(

@@ -16,12 +16,11 @@ class LocalGameController extends ChangeNotifier {
   }) : _random = random ?? Random(),
        _aiEngine = aiEngine ?? DumbAiEngine(random: random ?? Random()),
        _cooldownDuration = initialCooldownDuration {
-    _resetRuntimeState();
+    _resetRuntimeState(activateGame: false);
     _ticker = Timer.periodic(
       const Duration(milliseconds: 200),
       (_) => _onTick(),
     );
-    _maybeScheduleAiMove();
   }
 
   Duration _cooldownDuration;
@@ -35,6 +34,7 @@ class LocalGameController extends ChangeNotifier {
   Timer? _aiMoveTimer;
   bool _disposed = false;
   bool _aiMovePending = false;
+  bool _hasActiveGame = false;
 
   String _playerColor = 'w';
   int _version = 0;
@@ -42,9 +42,10 @@ class LocalGameController extends ChangeNotifier {
   DateTime _blackReadyAt = DateTime.now();
   String? _selectedSquare;
   Set<String> _legalTargets = <String>{};
-  String? _lastMoveFrom;
-  String? _lastMoveTo;
-  String? _lastMoverColor;
+  String? _playerLastMoveFrom;
+  String? _playerLastMoveTo;
+  String? _opponentLastMoveFrom;
+  String? _opponentLastMoveTo;
   String? _feedback;
   String? _winnerColor;
   String? _queuedMoveFrom;
@@ -55,20 +56,7 @@ class LocalGameController extends ChangeNotifier {
   Duration get cooldownDuration => _cooldownDuration;
   String get playerColor => _playerColor;
   String get aiColor => _otherColor(playerColor);
-  String get readyLabel {
-    final playerReady = cooldownRemaining(playerColor).inMilliseconds == 0;
-    final botReady = cooldownRemaining(aiColor).inMilliseconds == 0;
-    if (playerReady && botReady) {
-      return 'Both';
-    }
-    if (playerReady) {
-      return 'You';
-    }
-    if (botReady) {
-      return 'Bot';
-    }
-    return 'None';
-  }
+  bool get hasActiveGame => _hasActiveGame;
 
   String get turnColor => _colorCode(_game.turn);
   String get turnLabel => turnColor == 'w' ? 'White' : 'Black';
@@ -82,7 +70,8 @@ class LocalGameController extends ChangeNotifier {
   }
 
   bool get aiMovePending => _aiMovePending;
-  bool get canPlayerInteract => !isGameOver && _hasAnyLegalMove(playerColor);
+  bool get canPlayerInteract =>
+      _hasActiveGame && !isGameOver && _hasAnyLegalMove(playerColor);
   bool get hasQueuedMove => _queuedMoveFrom != null && _queuedMoveTo != null;
   String? get queuedMoveLabel {
     if (!hasQueuedMove) {
@@ -90,18 +79,20 @@ class LocalGameController extends ChangeNotifier {
     }
     return '$_queuedMoveFrom-$_queuedMoveTo';
   }
+  String? get queuedMoveFrom => _queuedMoveFrom;
+  String? get queuedMoveTo => _queuedMoveTo;
 
   String? get selectedSquare => _selectedSquare;
   Set<String> get legalTargets => _legalTargets;
-  String? get lastMoveFrom => _lastMoveFrom;
-  String? get lastMoveTo => _lastMoveTo;
-  bool get isOpponentLastMove =>
-      _lastMoverColor != null && _lastMoverColor == aiColor;
+  String? get playerLastMoveFrom => _playerLastMoveFrom;
+  String? get playerLastMoveTo => _playerLastMoveTo;
+  String? get opponentLastMoveFrom => _opponentLastMoveFrom;
+  String? get opponentLastMoveTo => _opponentLastMoveTo;
   String? get opponentLastMoveLabel {
-    if (!isOpponentLastMove || _lastMoveFrom == null || _lastMoveTo == null) {
+    if (_opponentLastMoveFrom == null || _opponentLastMoveTo == null) {
       return null;
     }
-    return '$_lastMoveFrom-$_lastMoveTo';
+    return '$_opponentLastMoveFrom-$_opponentLastMoveTo';
   }
 
   String? get feedback => _feedback;
@@ -109,6 +100,9 @@ class LocalGameController extends ChangeNotifier {
   Map<String, String> get boardPieces => _boardPiecesFromFen(_game.fen);
 
   String get statusText {
+    if (!_hasActiveGame) {
+      return 'Start a new game to begin.';
+    }
     if (_winnerColor != null) {
       return '${winnerLabel!} wins by checkmate. Start a new game.';
     }
@@ -165,7 +159,7 @@ class LocalGameController extends ChangeNotifier {
     if (cooldownDuration != null) {
       _cooldownDuration = cooldownDuration;
     }
-    _resetRuntimeState();
+    _resetRuntimeState(activateGame: true);
     _maybeScheduleAiMove();
     notifyListeners();
   }
@@ -218,7 +212,7 @@ class LocalGameController extends ChangeNotifier {
       if (onCooldown) {
         _queuePlayerMove(from: from, to: square, promotion: 'q');
         _clearSelection();
-        _feedback = 'Queued $from-$square';
+        _feedback = null;
         notifyListeners();
         return;
       }
@@ -241,7 +235,9 @@ class LocalGameController extends ChangeNotifier {
     if (isOwnPiece) {
       final onCooldown = cooldownRemaining(playerColor).inMilliseconds > 0;
       if (onCooldown && _selectedSquare != square) {
-        _feedback = 'Cannot queue onto your own occupied square.';
+        _queuePlayerMove(from: from, to: square, promotion: 'q');
+        _clearSelection();
+        _feedback = null;
         notifyListeners();
         return;
       }
@@ -268,6 +264,9 @@ class LocalGameController extends ChangeNotifier {
     if (_disposed) {
       return;
     }
+    if (!_hasActiveGame) {
+      return;
+    }
     _refreshTerminalState();
     _tryExecuteQueuedPlayerMove();
     _maybeScheduleAiMove();
@@ -275,7 +274,8 @@ class LocalGameController extends ChangeNotifier {
   }
 
   void _maybeScheduleAiMove() {
-    if (_aiMovePending ||
+    if (!_hasActiveGame ||
+        _aiMovePending ||
         isGameOver ||
         cooldownRemaining(aiColor).inMilliseconds > 0 ||
         !_hasAnyLegalMove(aiColor)) {
@@ -291,7 +291,8 @@ class LocalGameController extends ChangeNotifier {
       return;
     }
 
-    if (isGameOver ||
+    if (!_hasActiveGame ||
+        isGameOver ||
         cooldownRemaining(aiColor).inMilliseconds > 0 ||
         !_hasAnyLegalMove(aiColor)) {
       _aiMovePending = false;
@@ -315,14 +316,16 @@ class LocalGameController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _resetRuntimeState() {
+  void _resetRuntimeState({required bool activateGame}) {
     _game = chess.Chess();
+    _hasActiveGame = activateGame;
     _version = 0;
     _selectedSquare = null;
     _legalTargets = <String>{};
-    _lastMoveFrom = null;
-    _lastMoveTo = null;
-    _lastMoverColor = null;
+    _playerLastMoveFrom = null;
+    _playerLastMoveTo = null;
+    _opponentLastMoveFrom = null;
+    _opponentLastMoveTo = null;
     _feedback = null;
     _aiMovePending = false;
     _queuedMoveFrom = null;
@@ -342,7 +345,9 @@ class LocalGameController extends ChangeNotifier {
     required String moverColor,
     String promotion = 'q',
   }) {
-    if (isGameOver || cooldownRemaining(moverColor).inMilliseconds > 0) {
+    if (!_hasActiveGame ||
+        isGameOver ||
+        cooldownRemaining(moverColor).inMilliseconds > 0) {
       return false;
     }
 
@@ -371,9 +376,13 @@ class LocalGameController extends ChangeNotifier {
     }
 
     _version += 1;
-    _lastMoveFrom = from;
-    _lastMoveTo = to;
-    _lastMoverColor = moverColor;
+    if (moverColor == playerColor) {
+      _playerLastMoveFrom = from;
+      _playerLastMoveTo = to;
+    } else {
+      _opponentLastMoveFrom = from;
+      _opponentLastMoveTo = to;
+    }
     _setCooldownForMover(moverColor);
     _refreshSelectionForCurrentBoard();
     _refreshTerminalState();
@@ -613,7 +622,7 @@ class LocalGameController extends ChangeNotifier {
   }
 
   void _tryExecuteQueuedPlayerMove() {
-    if (!hasQueuedMove || isGameOver) {
+    if (!_hasActiveGame || !hasQueuedMove || isGameOver) {
       return;
     }
     if (cooldownRemaining(playerColor).inMilliseconds > 0) {
@@ -631,7 +640,7 @@ class LocalGameController extends ChangeNotifier {
     );
     if (legalMove == null) {
       _clearQueuedMove();
-      _feedback = 'Queued move expired';
+      _feedback = null;
       return;
     }
 
@@ -643,7 +652,7 @@ class LocalGameController extends ChangeNotifier {
     );
     if (!moved) {
       _clearQueuedMove();
-      _feedback = 'Queued move failed';
+      _feedback = null;
       return;
     }
 
@@ -667,6 +676,10 @@ class LocalGameController extends ChangeNotifier {
   }
 
   void _refreshTerminalState() {
+    if (!_hasActiveGame) {
+      _winnerColor = null;
+      return;
+    }
     final winner = _detectCheckmateWinner();
     _winnerColor = winner;
 

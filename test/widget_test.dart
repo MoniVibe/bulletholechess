@@ -32,7 +32,7 @@ void main() {
     await tester.tap(find.text('Game Menu'));
     await tester.pumpAndSettle();
 
-    expect(find.text('New Game: White'), findsOneWidget);
+    expect(find.text('New Game'), findsOneWidget);
     expect(find.text('Cooldown (seconds)'), findsOneWidget);
   });
 }
