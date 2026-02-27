@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../engine/online_game_controller.dart';
 import 'chess_board_view.dart';
@@ -36,7 +35,6 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
   bool _connecting = false;
   bool _backendActionInFlight = false;
   bool _isMatchMenuOpen = false;
-  bool _isDebugLogOpen = false;
   int _selectedCooldownSeconds = 3;
 
   @override
@@ -495,11 +493,6 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
     try {
       await _controller.checkBackendHealth(apiBaseUrl: _apiBaseController.text);
     } finally {
-      if (mounted) {
-        setState(() {
-          _backendActionInFlight = false;
-        });
-      }
       if (mounted) {
         setState(() {
           _backendActionInFlight = false;
