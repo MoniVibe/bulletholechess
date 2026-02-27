@@ -331,6 +331,10 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                     ),
                                     queuedMoveFrom: _controller.queuedMoveFrom,
                                     queuedMoveTo: _controller.queuedMoveTo,
+                                    checkedKingSquares:
+                                        _controller.checkedKingSquares,
+                                    isCheckmate: _isOnlineCheckmate(),
+                                    boardMessage: _onlineBoardMessage(),
                                     onSquareTap: _controller.tapSquare,
                                   ),
                                   if (!_controller.isConnected)
@@ -456,6 +460,28 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
     final halfSteps = (ms / 500).ceil();
     final halfSecondValue = halfSteps / 2;
     return '${halfSecondValue.toStringAsFixed(1)}s';
+  }
+
+  bool _isOnlineCheckmate() {
+    final result = _controller.resultCode;
+    return result == 'white_wins_checkmate' || result == 'black_wins_checkmate';
+  }
+
+  String? _onlineBoardMessage() {
+    final result = _controller.resultCode;
+    if (result == 'white_wins_checkmate') {
+      return 'Checkmate - White wins';
+    }
+    if (result == 'black_wins_checkmate') {
+      return 'Checkmate - Black wins';
+    }
+    if (result == 'draw') {
+      return 'Draw';
+    }
+    if (_controller.checkedKingSquares.isNotEmpty) {
+      return 'Check';
+    }
+    return null;
   }
 
   Future<void> _findMatch() async {

@@ -544,8 +544,9 @@ function handleSocketMessage({ match, color, socket, payload }) {
         return;
       }
 
+      const movePayload = movePayloadFromLegalMove(legalMove);
       const moved = withColorTurn(match.game, color, () =>
-        match.game.move({ from, to, promotion }),
+        match.game.move(movePayload),
       );
       if (!moved) {
         logEvent('move_rejected', {
@@ -835,10 +836,10 @@ function sanitizeSquare(value) {
 
 function sanitizePromotion(value) {
   if (typeof value !== 'string') {
-    return 'q';
+    return null;
   }
   const text = value.trim().toLowerCase();
-  return ['q', 'r', 'b', 'n'].includes(text) ? text : 'q';
+  return ['q', 'r', 'b', 'n'].includes(text) ? text : null;
 }
 
 function sanitizeMoveId(value) {
@@ -891,6 +892,21 @@ function boardPiecesFromFen(fen) {
   }
 
   return board;
+}
+
+function movePayloadFromLegalMove(move) {
+  if (!move || typeof move !== 'object') {
+    return null;
+  }
+
+  const payload = {
+    from: move.from,
+    to: move.to,
+  };
+  if (typeof move.promotion === 'string' && move.promotion.length > 0) {
+    payload.promotion = move.promotion;
+  }
+  return payload;
 }
 
 function isExpired(match) {

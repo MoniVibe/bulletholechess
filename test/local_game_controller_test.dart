@@ -88,6 +88,32 @@ void main() {
     expect(controller.boardPieces['g3'], 'P');
     expect(controller.boardPieces.containsKey('g2'), isFalse);
   });
+
+  test('player can castle kingside when legal', () {
+    final controller = LocalGameController(
+      initialCooldownDuration: Duration.zero,
+      aiThinkDelayMin: const Duration(days: 1),
+      aiThinkDelayMax: const Duration(days: 1),
+      aiEngine: _ScriptedAiEngine(const <EngineMove>[]),
+    );
+    addTearDown(controller.dispose);
+
+    controller.startNewGame(playerAsWhite: true);
+
+    controller.tapSquare('e2');
+    controller.tapSquare('e4');
+    controller.tapSquare('g1');
+    controller.tapSquare('f3');
+    controller.tapSquare('f1');
+    controller.tapSquare('e2');
+    controller.tapSquare('e1');
+    controller.tapSquare('g1');
+
+    expect(controller.boardPieces['g1'], 'K');
+    expect(controller.boardPieces['f1'], 'R');
+    expect(controller.boardPieces.containsKey('e1'), isFalse);
+    expect(controller.boardPieces.containsKey('h1'), isFalse);
+  });
 }
 
 class _ScriptedAiEngine extends DumbAiEngine {

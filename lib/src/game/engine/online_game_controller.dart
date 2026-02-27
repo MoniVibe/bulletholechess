@@ -138,6 +138,13 @@ class OnlineGameController extends ChangeNotifier {
   DateTime? get backendHealthCheckedAt => _backendHealthCheckedAt;
   Map<String, String> get boardPieces =>
       ChessRules.boardPiecesFromFen(_game.fen);
+  Set<String> get checkedKingSquares {
+    if (!isConnected || (_status != 'active' && _status != 'game_over')) {
+      return const <String>{};
+    }
+    return ChessRules.checkedKingSquares(_game);
+  }
+
   List<String> get history => _game.getHistory().cast<String>();
   String get playerColor => _myColor ?? 'w';
   String? get whitePlayerName => _whitePlayerName;
@@ -519,6 +526,8 @@ class OnlineGameController extends ChangeNotifier {
     final legalNow = legalMove != null;
 
     if (legalNow) {
+      final chosenPromotion =
+          legalMove['promotion'] as String? ?? _defaultPromotion;
       final onCooldown = cooldownRemaining(color).inMilliseconds > 0;
       if (onCooldown) {
         _logEvent(
@@ -530,7 +539,7 @@ class OnlineGameController extends ChangeNotifier {
             'remainingMs': cooldownRemaining(color).inMilliseconds,
           },
         );
-        _queuePlayerMove(from: from, to: square, promotion: _defaultPromotion);
+        _queuePlayerMove(from: from, to: square, promotion: chosenPromotion);
         _clearSelection();
         _feedback = null;
         notifyListeners();
@@ -540,7 +549,7 @@ class OnlineGameController extends ChangeNotifier {
       final sent = _sendMove(
         from: from,
         to: square,
-        promotion: _defaultPromotion,
+        promotion: legalMove['promotion'] as String?,
         source: 'manual',
       );
       if (sent) {
@@ -549,7 +558,7 @@ class OnlineGameController extends ChangeNotifier {
           details: <String, Object?>{
             'from': from,
             'to': square,
-            'promotion': _defaultPromotion,
+            'promotion': chosenPromotion,
             'source': 'manual',
             'clientMoveId': _inFlightClientMoveId,
           },
@@ -760,7 +769,7 @@ class OnlineGameController extends ChangeNotifier {
   bool _sendMove({
     required String from,
     required String to,
-    required String promotion,
+    String? promotion,
     required String source,
     int? queueToken,
   }) {
@@ -783,11 +792,13 @@ class OnlineGameController extends ChangeNotifier {
       'type': 'move',
       'from': from,
       'to': to,
-      'promotion': promotion,
       'clientMoveId': moveId,
       'source': source,
       'queueToken': queueToken,
     };
+    if (promotion != null && promotion.isNotEmpty) {
+      payload['promotion'] = promotion;
+    }
     if (queueToken == null) {
       payload.remove('queueToken');
     }
@@ -903,7 +914,7 @@ class OnlineGameController extends ChangeNotifier {
     final sent = _sendMove(
       from: from,
       to: to,
-      promotion: promotion,
+      promotion: legalMove['promotion'] as String?,
       source: 'queued',
       queueToken: queueToken,
     );

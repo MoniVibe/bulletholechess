@@ -284,6 +284,12 @@ class _GameScreenState extends State<GameScreen> {
                                 ),
                                 queuedMoveFrom: _controller.queuedMoveFrom,
                                 queuedMoveTo: _controller.queuedMoveTo,
+                                checkedKingSquares:
+                                    _controller.checkedKingSquares,
+                                isCheckmate:
+                                    _controller.isGameOver &&
+                                    _controller.winnerColor != null,
+                                boardMessage: _localBoardMessage(),
                                 onSquareTap: _controller.tapSquare,
                               ),
                               if (!_controller.hasActiveGame)
@@ -374,6 +380,19 @@ class _GameScreenState extends State<GameScreen> {
     final halfSteps = (ms / 500).ceil();
     final halfSecondValue = halfSteps / 2;
     return '${halfSecondValue.toStringAsFixed(1)}s';
+  }
+
+  String? _localBoardMessage() {
+    if (_controller.winnerColor != null) {
+      return 'Checkmate - ${_controller.winnerLabel} wins';
+    }
+    if (_controller.isGameOver && _controller.winnerColor == null) {
+      return 'Draw';
+    }
+    if (_controller.checkedKingSquares.isNotEmpty) {
+      return 'Check';
+    }
+    return null;
   }
 
   Future<void> _showNewGamePrompt() async {

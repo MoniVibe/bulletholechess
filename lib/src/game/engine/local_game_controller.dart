@@ -84,6 +84,7 @@ class LocalGameController extends ChangeNotifier {
     }
     return '$_queuedMoveFrom-$_queuedMoveTo';
   }
+
   String? get queuedMoveFrom => _queuedMoveFrom;
   String? get queuedMoveTo => _queuedMoveTo;
 
@@ -102,7 +103,14 @@ class LocalGameController extends ChangeNotifier {
 
   String? get feedback => _feedback;
   List<String> get history => _game.getHistory().cast<String>();
-  Map<String, String> get boardPieces => ChessRules.boardPiecesFromFen(_game.fen);
+  Map<String, String> get boardPieces =>
+      ChessRules.boardPiecesFromFen(_game.fen);
+  Set<String> get checkedKingSquares {
+    if (!_hasActiveGame) {
+      return const <String>{};
+    }
+    return ChessRules.checkedKingSquares(_game);
+  }
 
   String get statusText {
     if (!_hasActiveGame) {
@@ -189,7 +197,8 @@ class LocalGameController extends ChangeNotifier {
 
     final pieces = boardPieces;
     final piece = pieces[square];
-    final isOwnPiece = piece != null && ChessRules.pieceColor(piece) == playerColor;
+    final isOwnPiece =
+        piece != null && ChessRules.pieceColor(piece) == playerColor;
 
     if (_selectedSquare == null) {
       if (isOwnPiece) {
@@ -222,13 +231,11 @@ class LocalGameController extends ChangeNotifier {
     final legalNow = legalMove != null;
 
     if (legalNow) {
+      final chosenPromotion =
+          legalMove['promotion'] as String? ?? _defaultPromotion;
       final onCooldown = cooldownRemaining(playerColor).inMilliseconds > 0;
       if (onCooldown) {
-        _queuePlayerMove(
-          from: from,
-          to: square,
-          promotion: _defaultPromotion,
-        );
+        _queuePlayerMove(from: from, to: square, promotion: chosenPromotion);
         _clearSelection();
         _feedback = null;
         notifyListeners();
@@ -238,6 +245,7 @@ class LocalGameController extends ChangeNotifier {
       final didMove = _applyMove(
         from: from,
         to: square,
+        promotion: chosenPromotion,
         moverColor: playerColor,
       );
       if (didMove) {
@@ -254,11 +262,7 @@ class LocalGameController extends ChangeNotifier {
       final onCooldown = cooldownRemaining(playerColor).inMilliseconds > 0;
       if (onCooldown && _selectedSquare != square) {
         // Allow speculative queueing (e.g. predicted recapture) while cooling down.
-        _queuePlayerMove(
-          from: from,
-          to: square,
-          promotion: _defaultPromotion,
-        );
+        _queuePlayerMove(from: from, to: square, promotion: _defaultPromotion);
         _clearSelection();
         _feedback = null;
         notifyListeners();
@@ -327,7 +331,11 @@ class LocalGameController extends ChangeNotifier {
       return;
     }
 
-    final move = ChessRules.withTurn(_game, aiColor, () => _aiEngine.chooseMove(_game));
+    final move = ChessRules.withTurn(
+      _game,
+      aiColor,
+      () => _aiEngine.chooseMove(_game),
+    );
     if (move != null) {
       _applyMove(
         from: move.from,
@@ -391,7 +399,8 @@ class LocalGameController extends ChangeNotifier {
 
     final previousTurn = _game.turn;
     _game.turn = ChessRules.toChessColor(moverColor);
-    final moved = _game.move({'from': from, 'to': to, 'promotion': promotion});
+    final payload = ChessRules.movePayloadFromLegalMove(legalMove);
+    final moved = _game.move(payload);
 
     if (!moved) {
       _game.turn = previousTurn;
@@ -538,5 +547,4 @@ class LocalGameController extends ChangeNotifier {
     final delta = _random.nextInt(maxMs - minMs + 1);
     return Duration(milliseconds: minMs + delta);
   }
-
 }

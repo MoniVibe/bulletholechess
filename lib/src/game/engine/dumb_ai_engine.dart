@@ -2,6 +2,8 @@ import 'dart:math';
 
 import 'package:chess/chess.dart' as chess;
 
+import 'chess_rules.dart';
+
 class EngineMove {
   const EngineMove({
     required this.from,
@@ -109,11 +111,7 @@ class DumbAiEngine {
 
   String _nextPositionKey(chess.Chess game, Map<String, dynamic> move) {
     final sandbox = game.copy();
-    final moved = sandbox.move(<String, String>{
-      'from': move['from'] as String,
-      'to': move['to'] as String,
-      'promotion': move['promotion'] as String? ?? 'q',
-    });
+    final moved = sandbox.move(ChessRules.movePayloadFromLegalMove(move));
     if (!moved) {
       return _normalizedPositionKey(game.fen);
     }

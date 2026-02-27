@@ -2,17 +2,20 @@ import 'package:chess/chess.dart' as chess;
 
 class ChessRules {
   static const String defaultPromotion = 'q';
+  static const String _files = 'abcdefgh';
 
   static String colorCode(chess.Color color) {
     return color == chess.Color.WHITE ? 'w' : 'b';
   }
 
   static chess.Color toChessColor(String color) {
-    return color == 'w' ? chess.Color.WHITE : chess.Color.BLACK;
+    final normalized = color.trim().toLowerCase();
+    return normalized == 'w' ? chess.Color.WHITE : chess.Color.BLACK;
   }
 
   static String oppositeColor(String color) {
-    return color == 'w' ? 'b' : 'w';
+    final normalized = color.trim().toLowerCase();
+    return normalized == 'w' ? 'b' : 'w';
   }
 
   static String pieceColor(String piece) {
@@ -39,14 +42,11 @@ class ChessRules {
     required String square,
     required String color,
   }) {
-    final legalMoves = withTurn(
-      game,
-      color,
-      () => game
-          .moves(<String, dynamic>{'verbose': true})
-          .map((dynamic item) => Map<String, dynamic>.from(item as Map))
-          .toList(),
-    );
+    if (!_isValidSquare(square)) {
+      return <String>{};
+    }
+
+    final legalMoves = _legalMovesForColor(game: game, color: color);
 
     return legalMoves
         .where((move) => move['from'] == square)
@@ -69,31 +69,34 @@ class ChessRules {
     required String color,
     required String promotion,
   }) {
-    return withTurn(game, color, () {
-      final legalMoves = game
-          .moves(<String, dynamic>{'verbose': true})
-          .map((dynamic item) => Map<String, dynamic>.from(item as Map))
-          .where((move) => move['from'] == from && move['to'] == to)
-          .toList();
-
-      if (legalMoves.isEmpty) {
-        return null;
-      }
-
-      for (final move in legalMoves) {
-        if (move['promotion'] == promotion) {
-          return move;
-        }
-      }
-
-      for (final move in legalMoves) {
-        if (move['promotion'] == null) {
-          return move;
-        }
-      }
-
+    if (!_isValidSquare(from) || !_isValidSquare(to)) {
       return null;
-    });
+    }
+
+    final legalMoves = _legalMovesForColor(
+      game: game,
+      color: color,
+    ).where((move) => move['from'] == from && move['to'] == to).toList();
+
+    if (legalMoves.isEmpty) {
+      return null;
+    }
+
+    for (final move in legalMoves) {
+      if (move['promotion'] == promotion) {
+        return move;
+      }
+    }
+
+    for (final move in legalMoves) {
+      if (move['promotion'] == null) {
+        return move;
+      }
+    }
+
+    // When callers pass a stale/unsupported promotion choice, still return a
+    // legal option so upstream code can recover with a valid payload.
+    return legalMoves.first;
   }
 
   static String? detectCheckmateWinner(chess.Chess game) {
@@ -111,9 +114,11 @@ class ChessRules {
   }
 
   static Map<String, String> boardPiecesFromFen(String fen) {
-    const files = 'abcdefgh';
     final rows = fen.split(' ').first.split('/');
     final board = <String, String>{};
+    if (rows.length != 8) {
+      return board;
+    }
 
     for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
       final row = rows[rowIndex];
@@ -126,12 +131,90 @@ class ChessRules {
           continue;
         }
 
-        final square = '${files[fileIndex]}${8 - rowIndex}';
+        if (fileIndex < 0 || fileIndex >= _files.length) {
+          break;
+        }
+        final square = '${_files[fileIndex]}${8 - rowIndex}';
         board[square] = symbol;
         fileIndex += 1;
       }
     }
 
     return board;
+  }
+
+  static Map<String, String> movePayloadFromLegalMove(
+    Map<String, dynamic> legalMove,
+  ) {
+    final from = legalMove['from'];
+    final to = legalMove['to'];
+    if (from is! String || to is! String) {
+      throw ArgumentError('Legal move is missing from/to squares.');
+    }
+
+    final payload = <String, String>{'from': from, 'to': to};
+    final promotion = legalMove['promotion'];
+    if (promotion is String && promotion.isNotEmpty) {
+      payload['promotion'] = promotion;
+    }
+    return payload;
+  }
+
+  static Set<String> checkedKingSquares(chess.Chess game) {
+    final board = boardPiecesFromFen(game.fen);
+    final squares = <String>{};
+
+    if (isInCheckFor(game, 'w')) {
+      final whiteKingSquare = kingSquareFromBoard(board: board, color: 'w');
+      if (whiteKingSquare != null) {
+        squares.add(whiteKingSquare);
+      }
+    }
+    if (isInCheckFor(game, 'b')) {
+      final blackKingSquare = kingSquareFromBoard(board: board, color: 'b');
+      if (blackKingSquare != null) {
+        squares.add(blackKingSquare);
+      }
+    }
+
+    return squares;
+  }
+
+  static String? kingSquareFromBoard({
+    required Map<String, String> board,
+    required String color,
+  }) {
+    final normalized = color.trim().toLowerCase();
+    final target = normalized == 'w' ? 'K' : 'k';
+    for (final entry in board.entries) {
+      if (entry.value == target) {
+        return entry.key;
+      }
+    }
+    return null;
+  }
+
+  static List<Map<String, dynamic>> _legalMovesForColor({
+    required chess.Chess game,
+    required String color,
+  }) {
+    return withTurn(
+      game,
+      color,
+      () => game
+          .moves(<String, dynamic>{'verbose': true})
+          .map((dynamic item) => Map<String, dynamic>.from(item as Map))
+          .toList(),
+    );
+  }
+
+  static bool _isValidSquare(String square) {
+    if (square.length != 2) {
+      return false;
+    }
+
+    final file = square[0];
+    final rank = int.tryParse(square[1]);
+    return _files.contains(file) && rank != null && rank >= 1 && rank <= 8;
   }
 }

@@ -15,6 +15,9 @@ class ChessBoardView extends StatelessWidget {
     this.secondaryMoveHighlightColor = const Color(0xFFE57373),
     this.queuedMoveFrom,
     this.queuedMoveTo,
+    this.checkedKingSquares = const <String>{},
+    this.isCheckmate = false,
+    this.boardMessage,
     super.key,
   });
 
@@ -30,6 +33,9 @@ class ChessBoardView extends StatelessWidget {
   final Color secondaryMoveHighlightColor;
   final String? queuedMoveFrom;
   final String? queuedMoveTo;
+  final Set<String> checkedKingSquares;
+  final bool isCheckmate;
+  final String? boardMessage;
   final ValueChanged<String> onSquareTap;
 
   static const _files = 'abcdefgh';
@@ -70,6 +76,7 @@ class ChessBoardView extends StatelessWidget {
                 square == secondaryMoveFrom || square == secondaryMoveTo;
             final isQueuedSquare =
                 square == queuedMoveFrom || square == queuedMoveTo;
+            final isCheckedKingSquare = checkedKingSquares.contains(square);
 
             final baseColor = isDarkSquare
                 ? const Color(0xFF8D6E63)
@@ -137,6 +144,67 @@ class ChessBoardView extends StatelessWidget {
                               border: Border.all(
                                 color: const Color(0xFF006064),
                                 width: 2,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (isCheckedKingSquare)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: RadialGradient(
+                                colors: <Color>[
+                                  const Color(0x00FFFFFF).withValues(alpha: 0),
+                                  const Color(0xFFFBC02D).withValues(
+                                    alpha: isCheckmate ? 0.26 : 0.18,
+                                  ),
+                                  const Color(
+                                    0xFFD84315,
+                                  ).withValues(alpha: isCheckmate ? 0.4 : 0.28),
+                                ],
+                                stops: const <double>[0.45, 0.78, 1.0],
+                              ),
+                              border: Border.all(
+                                color: const Color(
+                                  0xFFF57F17,
+                                ).withValues(alpha: isCheckmate ? 0.9 : 0.72),
+                                width: isCheckmate ? 3 : 2,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (boardMessage != null && boardMessage!.isNotEmpty)
+                      Positioned(
+                        left: 8,
+                        right: 8,
+                        top: 8,
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: const Color(0xEE1B1B1B),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: const Color(0xD9FBC02D),
+                                width: isCheckmate ? 1.5 : 1,
+                              ),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              child: Text(
+                                boardMessage!,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Color(0xFFF9F6EE),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.1,
+                                ),
                               ),
                             ),
                           ),
