@@ -18,7 +18,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          cache: true
+          cache: false
 
       - name: Install dependencies
         run: flutter pub get
@@ -26,12 +26,13 @@ jobs:
       - name: AI-vs-AI stress duel
         run: dart run tool/ai_duel.dart --games=500 --max-plies=260 --seed=20260226 --conversion-fail-cap-adv=5 --max-conversion-failures=14 --log-file=debug/nightly-ai-duel-weird.jsonl --pgn-dir=debug/nightly-ai-duel-weird-pgn
 
-      - name: Upload AI duel weird logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ai-duel-weird-logs-nightly
-          path: |
-            debug/nightly-ai-duel-weird.jsonl
-            debug/nightly-ai-duel-weird-pgn
-          if-no-files-found: warn
+      - name: Print AI duel debug snippet on failure
+        if: failure()
+        shell: bash
+        run: |
+          if [ -f debug/nightly-ai-duel-weird.jsonl ]; then
+            echo "Recent AI duel weird events:"
+            tail -n 80 debug/nightly-ai-duel-weird.jsonl || true
+          else
+            echo "No AI duel weird log file produced."
+          fi
