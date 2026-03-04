@@ -49,6 +49,10 @@ class ChessBoardView extends StatelessWidget {
   final ValueChanged<String> onSquareTap;
 
   static const String _files = 'abcdefgh';
+  // Visual-only scale so piece taps/layout remain stable while art appears bigger.
+  static const double _pieceVisualScale = 1.4;
+  // Lift oversized art slightly so bottoms stay inside square bounds.
+  static const double _pieceVerticalOffsetPx = -10;
   static const TextStyle _pieceFallbackStyle = TextStyle(
     fontSize: 30,
     fontWeight: FontWeight.w700,
@@ -198,7 +202,16 @@ class ChessBoardView extends StatelessWidget {
                                 Positioned.fill(
                                   child: Padding(
                                     padding: const EdgeInsets.all(1.5),
-                                    child: _buildPieceSprite(piece),
+                                    child: Transform.translate(
+                                      offset: const Offset(
+                                        0,
+                                        _pieceVerticalOffsetPx,
+                                      ),
+                                      child: Transform.scale(
+                                        scale: _pieceVisualScale,
+                                        child: _buildPieceSprite(piece),
+                                      ),
+                                    ),
                                   ),
                                 ),
                               Positioned(
