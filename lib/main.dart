@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'src/game/ui/game_screen.dart';
+import 'src/game/ui/chess_game_screen.dart';
 
 void main() {
   runApp(const BulletholeChessApp());
@@ -28,7 +28,7 @@ class BulletholeChessApp extends StatelessWidget {
     );
 
     return MaterialApp(
-      title: 'Bullethole Sheshbesh',
+      title: 'Bullethole Chess',
       debugShowCheckedModeBanner: false,
       theme: baseTheme.copyWith(
         textTheme: baseTheme.textTheme
@@ -73,7 +73,7 @@ class BulletholeChessApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const GameScreen(),
+      home: const ChessGameScreen(),
     );
   }
 }

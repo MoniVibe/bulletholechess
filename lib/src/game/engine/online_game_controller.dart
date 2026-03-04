@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:bullethole_shared/bullethole_shared.dart';
 import 'package:chess/chess.dart' as chess;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -14,6 +16,7 @@ enum BackendHealthState { unknown, checking, healthy, unhealthy }
 
 class OnlineGameController extends ChangeNotifier {
   static const String _defaultPromotion = ChessRules.defaultPromotion;
+  static const String _defaultPieceSkinId = 'chess_classic';
   static const Duration _defaultHealthTimeout = Duration(seconds: 5);
   static const Duration _defaultWakeTimeout = Duration(seconds: 15);
   static const int _maxDebugLogEntries = 400;
@@ -24,6 +27,11 @@ class OnlineGameController extends ChangeNotifier {
   }) : _cooldownDuration = initialCooldownDuration {
     _httpClient = httpClient ?? http.Client();
     _ownsHttpClient = httpClient == null;
+    _backendHealthChecker = BackendHealthChecker(
+      httpClient: _httpClient,
+      defaultTimeout: _defaultHealthTimeout,
+      wakeTimeout: _defaultWakeTimeout,
+    );
     final now = DateTime.now().millisecondsSinceEpoch;
     _whiteReadyAtMs = now;
     _blackReadyAtMs = now;
@@ -38,6 +46,7 @@ class OnlineGameController extends ChangeNotifier {
   late final Timer _ticker;
   late final http.Client _httpClient;
   late final bool _ownsHttpClient;
+  late final BackendHealthChecker _backendHealthChecker;
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _subscription;
 
@@ -69,6 +78,11 @@ class OnlineGameController extends ChangeNotifier {
   String? _whitePlayerName;
   String? _blackPlayerName;
   String? _result;
+  String _myPieceSkinId = _defaultPieceSkinId;
+  Map<String, String> _pieceSkinByColor = <String, String>{
+    'w': _defaultPieceSkinId,
+    'b': _defaultPieceSkinId,
+  };
 
   String? _queuedMoveFrom;
   String? _queuedMoveTo;
@@ -142,6 +156,11 @@ class OnlineGameController extends ChangeNotifier {
   String get playerColor => _myColor ?? 'w';
   String? get whitePlayerName => _whitePlayerName;
   String? get blackPlayerName => _blackPlayerName;
+  String get myPieceSkinId => _myPieceSkinId;
+
+  String pieceSkinIdForColor(String color) {
+    return _pieceSkinByColor[color] ?? _defaultPieceSkinId;
+  }
 
   String get statusText {
     if (_connectionState == OnlineConnectionState.disconnected) {
@@ -215,6 +234,39 @@ class OnlineGameController extends ChangeNotifier {
       return Duration.zero;
     }
     return Duration(milliseconds: remaining);
+  }
+
+  void setMyPieceSkin(String skinId) {
+    final normalizedSkinId = MultiplayerClientUtils.sanitizeIdentifier(skinId);
+    if (normalizedSkinId == null || normalizedSkinId == _myPieceSkinId) {
+      return;
+    }
+
+    _myPieceSkinId = normalizedSkinId;
+    final myColor = _myColor;
+    if (myColor != null) {
+      _pieceSkinByColor[myColor] = normalizedSkinId;
+    } else {
+      _pieceSkinByColor = <String, String>{
+        'w': normalizedSkinId,
+        'b': normalizedSkinId,
+      };
+    }
+
+    if (isConnected) {
+      _send(<String, dynamic>{
+        'type': 'set_piece_skin',
+        'pieceSkinId': normalizedSkinId,
+      });
+      _logEvent(
+        'piece_skin_update_sent',
+        details: <String, Object?>{
+          'pieceSkinId': normalizedSkinId,
+          'myColor': _myColor,
+        },
+      );
+    }
+    notifyListeners();
   }
 
   void clearDebugLog() {
@@ -300,6 +352,7 @@ class OnlineGameController extends ChangeNotifier {
         'apiBase': apiBaseUrl.trim(),
         'name': normalizedName,
         'cooldownSeconds': cooldownSeconds,
+        'pieceSkinId': _myPieceSkinId,
       },
     );
     _connectionState = OnlineConnectionState.connecting;
@@ -310,8 +363,11 @@ class OnlineGameController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final baseUri = _parseBaseUri(apiBaseUrl);
-      final payload = <String, dynamic>{'name': normalizedName};
+      final baseUri = MultiplayerClientUtils.parseApiBaseUri(apiBaseUrl);
+      final payload = <String, dynamic>{
+        'name': normalizedName,
+        'pieceSkinId': _myPieceSkinId,
+      };
       if (cooldownSeconds != null) {
         payload['cooldownSeconds'] = cooldownSeconds;
       }
@@ -322,7 +378,7 @@ class OnlineGameController extends ChangeNotifier {
         body: jsonEncode(payload),
       );
 
-      final body = _decodeResponseMap(response.body);
+      final body = MultiplayerClientUtils.decodeJsonMap(response.body);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         _logEvent(
           'matchmaking_http_error',
@@ -339,7 +395,9 @@ class OnlineGameController extends ChangeNotifier {
       final matchId = body['matchId'] as String?;
       final playerId = body['playerId'] as String?;
       final wsPath = body['wsPath'] as String? ?? '/ws';
-      final responseCooldown = _readInt(body['cooldownSeconds']);
+      final responseCooldown = MultiplayerClientUtils.readInt(
+        body['cooldownSeconds'],
+      );
       if (responseCooldown != null && responseCooldown > 0) {
         _cooldownDuration = Duration(seconds: responseCooldown);
       }
@@ -368,7 +426,10 @@ class OnlineGameController extends ChangeNotifier {
         details: <String, Object?>{'error': error.toString()},
       );
       _connectionState = OnlineConnectionState.disconnected;
-      _feedback = 'Matchmaking failed: $error';
+      _feedback = _friendlyNetworkError(
+        error,
+        fallback: 'Matchmaking failed: $error',
+      );
       notifyListeners();
     }
   }
@@ -401,7 +462,10 @@ class OnlineGameController extends ChangeNotifier {
       _subscription = channel.stream.listen(
         _onMessage,
         onError: (Object error) {
-          _feedback = 'Connection error: $error';
+          _feedback = _friendlyNetworkError(
+            error,
+            fallback: 'Connection error: $error',
+          );
           _connectionState = OnlineConnectionState.disconnected;
           notifyListeners();
         },
@@ -417,10 +481,14 @@ class OnlineGameController extends ChangeNotifier {
         'type': 'join',
         'roomId': normalizedRoom,
         'name': normalizedName,
+        'pieceSkinId': _myPieceSkinId,
       });
     } catch (error) {
       _connectionState = OnlineConnectionState.disconnected;
-      _feedback = 'Unable to connect: $error';
+      _feedback = _friendlyNetworkError(
+        error,
+        fallback: 'Unable to connect: $error',
+      );
       notifyListeners();
     }
   }
@@ -444,6 +512,10 @@ class OnlineGameController extends ChangeNotifier {
     _status = 'disconnected';
     _matchId = null;
     _myColor = null;
+    _pieceSkinByColor = <String, String>{
+      'w': _myPieceSkinId,
+      'b': _myPieceSkinId,
+    };
     _lastMoverColor = null;
     _myLastMoveFrom = null;
     _myLastMoveTo = null;
@@ -632,48 +704,25 @@ class OnlineGameController extends ChangeNotifier {
     _backendHealthMessage = null;
     notifyListeners();
 
-    try {
-      final baseUri = _parseBaseUri(apiBaseUrl);
-      final response = await _httpClient
-          .get(
-            baseUri.resolve('/healthz'),
-            headers: const {'accept': 'application/json'},
-          )
-          .timeout(timeout);
-      final body = _decodeResponseMap(response.body);
-      final ok =
-          response.statusCode >= 200 &&
-          response.statusCode < 300 &&
-          (body.isEmpty || body['ok'] == true);
-      _backendHealthState = ok
-          ? BackendHealthState.healthy
-          : BackendHealthState.unhealthy;
-      _backendHealthMessage = ok
-          ? null
-          : body['error'] as String? ??
-                'Health endpoint failed (${response.statusCode}).';
-      _backendHealthCheckedAt = DateTime.now();
-      _logEvent(
-        'backend_health_check_result',
-        details: <String, Object?>{
-          'ok': ok,
-          'statusCode': response.statusCode,
-          'message': _backendHealthMessage,
-        },
-      );
-      notifyListeners();
-      return ok;
-    } catch (error) {
-      _backendHealthState = BackendHealthState.unhealthy;
-      _backendHealthMessage = 'Health check failed: $error';
-      _backendHealthCheckedAt = DateTime.now();
-      _logEvent(
-        'backend_health_check_failed',
-        details: <String, Object?>{'error': error.toString()},
-      );
-      notifyListeners();
-      return false;
-    }
+    final result = await _backendHealthChecker.check(
+      apiBaseUrl: apiBaseUrl,
+      timeout: timeout,
+    );
+    _backendHealthState = result.ok
+        ? BackendHealthState.healthy
+        : BackendHealthState.unhealthy;
+    _backendHealthMessage = result.ok ? null : result.message;
+    _backendHealthCheckedAt = result.checkedAt;
+    _logEvent(
+      'backend_health_check_result',
+      details: <String, Object?>{
+        'ok': result.ok,
+        'statusCode': result.statusCode,
+        'message': _backendHealthMessage,
+      },
+    );
+    notifyListeners();
+    return result.ok;
   }
 
   Future<bool> wakeBackend({required String apiBaseUrl}) async {
@@ -686,50 +735,22 @@ class OnlineGameController extends ChangeNotifier {
     _backendHealthMessage = 'Requesting backend wake-up...';
     notifyListeners();
 
-    try {
-      final baseUri = _parseBaseUri(apiBaseUrl);
-      final response = await _httpClient
-          .get(
-            baseUri
-                .resolve('/healthz')
-                .replace(queryParameters: const {'wake': '1'}),
-            headers: const {'accept': 'application/json'},
-          )
-          .timeout(_defaultWakeTimeout);
-      final body = _decodeResponseMap(response.body);
-      final ok =
-          response.statusCode >= 200 &&
-          response.statusCode < 300 &&
-          (body.isEmpty || body['ok'] == true);
-      _backendHealthState = ok
-          ? BackendHealthState.healthy
-          : BackendHealthState.unhealthy;
-      _backendHealthMessage = ok
-          ? null
-          : body['error'] as String? ??
-                'Wake-up request failed (${response.statusCode}).';
-      _backendHealthCheckedAt = DateTime.now();
-      _logEvent(
-        'backend_wake_result',
-        details: <String, Object?>{
-          'ok': ok,
-          'statusCode': response.statusCode,
-          'message': _backendHealthMessage,
-        },
-      );
-      notifyListeners();
-      return ok;
-    } catch (error) {
-      _backendHealthState = BackendHealthState.unhealthy;
-      _backendHealthMessage = 'Wake-up failed: $error';
-      _backendHealthCheckedAt = DateTime.now();
-      _logEvent(
-        'backend_wake_failed',
-        details: <String, Object?>{'error': error.toString()},
-      );
-      notifyListeners();
-      return false;
-    }
+    final result = await _backendHealthChecker.wake(apiBaseUrl: apiBaseUrl);
+    _backendHealthState = result.ok
+        ? BackendHealthState.healthy
+        : BackendHealthState.unhealthy;
+    _backendHealthMessage = result.ok ? null : result.message;
+    _backendHealthCheckedAt = result.checkedAt;
+    _logEvent(
+      'backend_wake_result',
+      details: <String, Object?>{
+        'ok': result.ok,
+        'statusCode': result.statusCode,
+        'message': _backendHealthMessage,
+      },
+    );
+    notifyListeners();
+    return result.ok;
   }
 
   @override
@@ -825,7 +846,7 @@ class OnlineGameController extends ChangeNotifier {
     );
 
     try {
-      final baseUri = _parseBaseUri(apiBaseUrl);
+      final baseUri = MultiplayerClientUtils.parseApiBaseUri(apiBaseUrl);
       final query = <String, String>{'limit': '$normalizedLimit'};
       if (_matchId?.isNotEmpty ?? false) {
         query['matchId'] = _matchId!;
@@ -837,7 +858,7 @@ class OnlineGameController extends ChangeNotifier {
         throw Exception('Server debug logs failed (${response.statusCode})');
       }
 
-      final body = _decodeResponseMap(response.body);
+      final body = MultiplayerClientUtils.decodeJsonMap(response.body);
       final items = body['items'];
       if (items is! List) {
         _logEvent('server_logs_pull_empty');
@@ -974,10 +995,14 @@ class OnlineGameController extends ChangeNotifier {
     );
     await disconnect(notify: false);
 
-    final wsUri = _wsUriFromBase(baseUri, wsPath, <String, String>{
-      'matchId': matchId,
-      'playerId': playerId,
-    });
+    final wsUri = MultiplayerClientUtils.websocketUriFromBase(
+      baseUri: baseUri,
+      wsPath: wsPath,
+      queryParameters: <String, String>{
+        'matchId': matchId,
+        'playerId': playerId,
+      },
+    );
 
     try {
       _matchId = matchId;
@@ -990,7 +1015,10 @@ class OnlineGameController extends ChangeNotifier {
             'ws_stream_error',
             details: <String, Object?>{'error': error.toString()},
           );
-          _feedback = 'Connection error: $error';
+          _feedback = _friendlyNetworkError(
+            error,
+            fallback: 'Connection error: $error',
+          );
           _connectionState = OnlineConnectionState.disconnected;
           notifyListeners();
         },
@@ -1012,7 +1040,10 @@ class OnlineGameController extends ChangeNotifier {
         details: <String, Object?>{'error': error.toString()},
       );
       _connectionState = OnlineConnectionState.disconnected;
-      _feedback = 'Unable to connect game socket: $error';
+      _feedback = _friendlyNetworkError(
+        error,
+        fallback: 'Unable to connect game socket: $error',
+      );
       notifyListeners();
     }
   }
@@ -1047,12 +1078,23 @@ class OnlineGameController extends ChangeNotifier {
         _connectionState = OnlineConnectionState.connected;
         _matchId = map['matchId'] as String? ?? _matchId;
         _myColor = map['color'] as String?;
+        final welcomePieceSkinId = MultiplayerClientUtils.sanitizeIdentifier(
+          map['pieceSkinId'],
+        );
+        if (welcomePieceSkinId != null) {
+          _myPieceSkinId = welcomePieceSkinId;
+          if (_myColor != null) {
+            _pieceSkinByColor[_myColor!] = welcomePieceSkinId;
+          }
+        }
 
-        final welcomeCooldown = _readInt(map['cooldownSeconds']);
+        final welcomeCooldown = MultiplayerClientUtils.readInt(
+          map['cooldownSeconds'],
+        );
         if (welcomeCooldown != null && welcomeCooldown > 0) {
           _cooldownDuration = Duration(seconds: welcomeCooldown);
         }
-        final serverNow = _readInt(map['serverNow']);
+        final serverNow = MultiplayerClientUtils.readInt(map['serverNow']);
         if (serverNow != null) {
           _clockOffsetMs = serverNow - DateTime.now().millisecondsSinceEpoch;
         }
@@ -1063,6 +1105,7 @@ class OnlineGameController extends ChangeNotifier {
           details: <String, Object?>{
             'matchId': _matchId,
             'myColor': _myColor,
+            'pieceSkinId': _myPieceSkinId,
             'cooldownSeconds': _cooldownDuration.inSeconds,
           },
         );
@@ -1087,20 +1130,34 @@ class OnlineGameController extends ChangeNotifier {
         final errorCode = map['code'] as String?;
         final message = map['message'] as String? ?? 'Server error';
         _feedback = message;
-        final serverNow = _readInt(map['serverNow']);
+        final serverNow = MultiplayerClientUtils.readInt(map['serverNow']);
         if (serverNow != null) {
           _clockOffsetMs = serverNow - DateTime.now().millisecondsSinceEpoch;
         }
 
+        var receivedCooldownSnapshot = false;
         final cooldownEndsAt = map['cooldownEndsAt'];
         if (cooldownEndsAt is Map) {
-          final w = _readInt(cooldownEndsAt['w']);
-          final b = _readInt(cooldownEndsAt['b']);
+          final w = MultiplayerClientUtils.readInt(cooldownEndsAt['w']);
+          final b = MultiplayerClientUtils.readInt(cooldownEndsAt['b']);
           if (w != null) {
             _whiteReadyAtMs = w;
+            receivedCooldownSnapshot = true;
           }
           if (b != null) {
             _blackReadyAtMs = b;
+            receivedCooldownSnapshot = true;
+          }
+        }
+
+        if (!receivedCooldownSnapshot && errorCode == 'cooldown_active') {
+          final remainingMs = MultiplayerClientUtils.readInt(
+            map['remainingMs'],
+          );
+          final color = _myColor;
+          if (color != null && remainingMs != null && remainingMs > 0) {
+            final baseNow = serverNow ?? _estimatedServerNowMs();
+            _setReadyAtForColor(color, baseNow + remainingMs);
           }
         }
 
@@ -1147,31 +1204,36 @@ class OnlineGameController extends ChangeNotifier {
     }
     _sequence = nextSequence;
 
-    final serverNow = _readInt(state['serverNow']);
+    final serverNow = MultiplayerClientUtils.readInt(state['serverNow']);
     if (serverNow != null) {
       _clockOffsetMs = serverNow - DateTime.now().millisecondsSinceEpoch;
     }
 
-    final cooldownSeconds = _readInt(state['cooldownSeconds']);
+    final cooldownSeconds = MultiplayerClientUtils.readInt(
+      state['cooldownSeconds'],
+    );
     if (cooldownSeconds != null && cooldownSeconds > 0) {
       _cooldownDuration = Duration(seconds: cooldownSeconds);
     }
-    final cooldownMs = _readInt(state['cooldownMs']);
+    final cooldownMs = MultiplayerClientUtils.readInt(state['cooldownMs']);
     if ((cooldownSeconds == null || cooldownSeconds <= 0) &&
         cooldownMs != null &&
         cooldownMs > 0) {
       _cooldownDuration = Duration(milliseconds: cooldownMs);
     }
 
+    var receivedCooldownSnapshot = false;
     final cooldownEndsAt = state['cooldownEndsAt'];
     if (cooldownEndsAt is Map) {
-      final w = _readInt(cooldownEndsAt['w']);
-      final b = _readInt(cooldownEndsAt['b']);
+      final w = MultiplayerClientUtils.readInt(cooldownEndsAt['w']);
+      final b = MultiplayerClientUtils.readInt(cooldownEndsAt['b']);
       if (w != null) {
         _whiteReadyAtMs = w;
+        receivedCooldownSnapshot = true;
       }
       if (b != null) {
         _blackReadyAtMs = b;
+        receivedCooldownSnapshot = true;
       }
     }
 
@@ -1193,16 +1255,50 @@ class OnlineGameController extends ChangeNotifier {
       _blackPlayerName = players['b'] as String?;
     }
 
+    final pieceSkins = state['pieceSkins'];
+    if (pieceSkins is Map) {
+      final whiteSkin = MultiplayerClientUtils.sanitizeIdentifier(
+        pieceSkins['w'],
+      );
+      final blackSkin = MultiplayerClientUtils.sanitizeIdentifier(
+        pieceSkins['b'],
+      );
+      if (whiteSkin != null) {
+        _pieceSkinByColor['w'] = whiteSkin;
+      }
+      if (blackSkin != null) {
+        _pieceSkinByColor['b'] = blackSkin;
+      }
+      final myColor = _myColor;
+      if (myColor != null) {
+        final mySkin = _pieceSkinByColor[myColor];
+        if (mySkin != null) {
+          _myPieceSkinId = mySkin;
+        }
+      }
+    }
+
     final lastMove = state['lastMove'];
     if (lastMove is Map<String, dynamic>) {
       _lastMoveFrom = lastMove['from'] as String?;
       _lastMoveTo = lastMove['to'] as String?;
-      final lastMoveId = _readInt(lastMove['clientMoveId']);
+      final lastMoveId = MultiplayerClientUtils.readInt(
+        lastMove['clientMoveId'],
+      );
       final lastMoveSource = lastMove['source'] as String?;
-      final lastMoveQueueToken = _readInt(lastMove['queueToken']);
+      final lastMoveQueueToken = MultiplayerClientUtils.readInt(
+        lastMove['queueToken'],
+      );
       final turnAfterMove = state['turn'] as String? ?? turnColor;
       final moverColor = ChessRules.oppositeColor(turnAfterMove);
       _lastMoverColor = moverColor;
+      if (!receivedCooldownSnapshot) {
+        // Compatibility fallback for older/custom backends that don't emit
+        // `cooldownEndsAt` in state payloads. This keeps local timer HUD and
+        // queue behavior functional after a confirmed move.
+        final fallbackNow = serverNow ?? _estimatedServerNowMs();
+        _applyCooldownForMover(moverColor, fallbackNow);
+      }
       if (_myColor != null && moverColor == _myColor) {
         _myLastMoveFrom = _lastMoveFrom;
         _myLastMoveTo = _lastMoveTo;
@@ -1266,6 +1362,25 @@ class OnlineGameController extends ChangeNotifier {
     );
     _refreshSelectionForCurrentBoard();
     notifyListeners();
+  }
+
+  void _applyCooldownForMover(String moverColor, int atMs) {
+    final nextReady = atMs + _cooldownDuration.inMilliseconds;
+    if (moverColor == 'w') {
+      _whiteReadyAtMs = nextReady;
+      _blackReadyAtMs = atMs;
+      return;
+    }
+    _blackReadyAtMs = nextReady;
+    _whiteReadyAtMs = atMs;
+  }
+
+  void _setReadyAtForColor(String color, int readyAtMs) {
+    if (color == 'w') {
+      _whiteReadyAtMs = readyAtMs;
+      return;
+    }
+    _blackReadyAtMs = readyAtMs;
   }
 
   void _clearSelection() {
@@ -1349,49 +1464,21 @@ class OnlineGameController extends ChangeNotifier {
     }
   }
 
-  static Uri _parseBaseUri(String raw) {
-    final uri = Uri.parse(raw.trim());
-    if (!uri.hasScheme || uri.host.isEmpty) {
-      throw Exception('Use a full URL like https://your-host');
+  static String _friendlyNetworkError(
+    Object error, {
+    required String fallback,
+  }) {
+    if (error is SocketException) {
+      return 'Cannot reach backend (connection refused). Check Backend URL or start the server.';
     }
-    return uri;
-  }
 
-  static Map<String, dynamic> _decodeResponseMap(String body) {
-    if (body.isEmpty) {
-      return <String, dynamic>{};
+    final raw = error.toString().toLowerCase();
+    if (raw.contains('connection refused')) {
+      return 'Cannot reach backend (connection refused). Check Backend URL or start the server.';
     }
-    final decoded = jsonDecode(body);
-    if (decoded is! Map) {
-      return <String, dynamic>{};
+    if (raw.contains('failed host lookup')) {
+      return 'Backend host lookup failed. Check the Backend URL.';
     }
-    return Map<String, dynamic>.from(decoded);
-  }
-
-  static Uri _wsUriFromBase(
-    Uri baseUri,
-    String wsPath,
-    Map<String, String> query,
-  ) {
-    final scheme = baseUri.scheme == 'https' ? 'wss' : 'ws';
-    final normalizedPath = wsPath.startsWith('/') ? wsPath : '/$wsPath';
-    return baseUri.replace(
-      scheme: scheme,
-      path: normalizedPath,
-      queryParameters: query,
-    );
-  }
-
-  static int? _readInt(dynamic value) {
-    if (value is int) {
-      return value;
-    }
-    if (value is num) {
-      return value.toInt();
-    }
-    if (value is String) {
-      return int.tryParse(value);
-    }
-    return null;
+    return fallback;
   }
 }

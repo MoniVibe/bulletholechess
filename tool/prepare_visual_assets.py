@@ -33,46 +33,71 @@ BOARD_PLAYABLE_SIZE = BOARD_CANVAS_SIZE - (BOARD_PLAYABLE_INSET * 2)
 BACKGAMMON_BOARD_SIZE = 1024
 
 SOURCE_PIECES = {
-    "wP.png.png": "wP.png",
-    "wR.png.png": "wR.png",
-    "wK.png.png": "wN.png",
-    "wB.png.png": "wB.png",
-    "wQ.png.png": "wQ.png",
-    "wKing.png.png": "wK.png",
-    "bP.png.png": "bP.png",
-    "bR.png.png": "bR.png",
-    "bK.png.png": "bN.png",
-    "bB.png.png": "bB.png",
-    "bQ.png.png": "bQ.png",
-    "bKing.png.png": "bK.png",
+    "wP.png": ("wP.png-removebg-preview.png", "wP.png.png"),
+    "wR.png": ("wR.png-removebg-preview.png", "wR.png.png"),
+    "wN.png": ("wK.png-removebg-preview.png", "wK.png.png"),
+    "wB.png": ("wB.png-removebg-preview.png", "wB.png.png"),
+    "wQ.png": ("wQ.png-removebg-preview.png", "wQ.png.png"),
+    "wK.png": ("wKing.png-removebg-preview.png", "wKing.png.png"),
+    "bP.png": ("bP.png-removebg-preview.png", "bP.png.png"),
+    "bR.png": ("bR.png-removebg-preview.png", "bR.png.png"),
+    "bN.png": ("bK.png-removebg-preview.png", "bK.png.png"),
+    "bB.png": ("bB.png-removebg-preview.png", "bB.png.png"),
+    "bQ.png": ("bQ.png-removebg-preview.png", "bQ.png.png"),
+    "bK.png": ("bKing.png-removebg-preview.png", "bKing.png.png"),
 }
 
 SOURCE_COINS = {
-    "wCoin.png.png": "white_coin.png",
-    "bCoin.png.png": "black_coin.png",
-    "ChatGPT Image Mar 4, 2026, 08_21_36 PM.png": "red_coin.png",
+    "white_coin.png": ("wCoin.png-removebg-preview.png", "wCoin.png.png"),
+    "black_coin.png": ("bCoin.png-removebg-preview.png", "bCoin.png.png"),
+    "red_coin.png": (
+        "rCoin.png-removebg-preview.png",
+        "rCoin.png.png",
+        "ChatGPT Image Mar 4, 2026, 08_21_36 PM.png",
+    ),
 }
 
 SOURCE_DICE = {
-    "D1.png.png": "dice_1.png",
-    "D2.png.png": "dice_2.png",
-    "D3.png.png": "dice_3.png",
-    "D4.png.png": "dice_4.png",
-    "D5.png.png": "dice_5.png",
-    "D6.png.png": "dice_6.png",
+    "dice_1.png": ("D1.png-removebg-preview.png", "D1.png.png"),
+    "dice_2.png": ("D2.png-removebg-preview.png", "D2.png.png"),
+    "dice_3.png": ("D3.png-removebg-preview.png", "D3.png.png"),
+    "dice_4.png": ("D4.png-removebg-preview.png", "D4.png.png"),
+    "dice_5.png": ("D5.png-removebg-preview.png", "D5.png.png"),
+    "dice_6.png": ("D6.png-removebg-preview.png", "D6.png.png"),
 }
 
 SOURCE_RED_CHESS_PIECES = {
-    "ChatGPT Image Mar 4, 2026, 08_14_44 PM.png": "rP.png",
-    "ChatGPT Image Mar 4, 2026, 08_16_10 PM.png": "rR.png",
-    "rK.png.png": "rN.png",
-    "rB.png.png": "rB.png",
-    "ChatGPT Image Mar 4, 2026, 08_21_34 PM.png": "rQ.png",
-    "ChatGPT Image Mar 4, 2026, 08_18_12 PM.png": "rK.png",
+    "rP.png": (
+        "rP.png-removebg-preview.png",
+        "rP.png.png",
+        "ChatGPT Image Mar 4, 2026, 08_14_44 PM.png",
+    ),
+    "rR.png": (
+        "rR.png-removebg-preview.png",
+        "rR.png.png",
+        "ChatGPT Image Mar 4, 2026, 08_16_10 PM.png",
+    ),
+    "rN.png": ("rK.png-removebg-preview.png", "rK.png.png"),
+    "rB.png": ("rB.png-removebg-preview.png", "rB.png.png"),
+    "rQ.png": (
+        "rQ.png-removebg-preview.png",
+        "rQ.png.png",
+        "ChatGPT Image Mar 4, 2026, 08_21_34 PM.png",
+    ),
+    "rK.png": (
+        "rKing.png-removebg-preview.png",
+        "rKing.png.png",
+        "ChatGPT Image Mar 4, 2026, 08_18_12 PM.png",
+    ),
 }
 
 SOURCE_BACKGAMMON_BOARDS = {
-    "Backgammonboard.png.png": "backgammon_board_classic.png",
+    "backgammon_board_classic.png": ("Backgammonboard.png.png",),
+}
+
+OPTIONAL_TIME_BAR_VARIANTS = {
+    "HorizontalRedBar.png.png": ("time_bar_horizontal_red.png", (1200, 260)),
+    "VerticalGoldBar.png.png": ("time_bar_vertical_gold.png", (260, 1200)),
 }
 
 
@@ -281,10 +306,11 @@ def _save_png(path: Path, image: Image.Image) -> None:
 def _detect_black_bbox(
     image: Image.Image,
     threshold: int = 12,
+    alpha_threshold: int = 20,
 ) -> tuple[int, int, int, int]:
-    rgb = image.convert("RGB")
-    width, height = rgb.size
-    pixels = rgb.load()
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    pixels = rgba.load()
     min_x = width
     min_y = height
     max_x = -1
@@ -292,7 +318,9 @@ def _detect_black_bbox(
 
     for y in range(height):
         for x in range(width):
-            r, g, b = pixels[x, y]
+            r, g, b, a = pixels[x, y]
+            if a < alpha_threshold:
+                continue
             if r < threshold and g < threshold and b < threshold:
                 if x < min_x:
                     min_x = x
@@ -310,7 +338,16 @@ def _detect_black_bbox(
 
 
 def _normalize_board_frame(board_image: Image.Image) -> Image.Image:
-    x0, y0, x1, y1 = _detect_black_bbox(board_image, threshold=12)
+    try:
+        x0, y0, x1, y1 = _detect_black_bbox(board_image, threshold=12)
+    except ValueError:
+        alpha_bbox = board_image.split()[-1].getbbox()
+        if alpha_bbox is None:
+            raise
+        x0, y0, x1_exclusive, y1_exclusive = alpha_bbox
+        x1 = x1_exclusive - 1
+        y1 = y1_exclusive - 1
+
     black_width = x1 - x0 + 1
     black_height = y1 - y0 + 1
 
@@ -375,13 +412,22 @@ def _process_red_chess_piece(source_name: str, output_name: str) -> None:
 def _process_coin(source_name: str, output_name: str) -> None:
     source_path = ASSETS_DIR / source_name
     output_path = SHESHBESH_DIR / output_name
-    image = Image.open(source_path)
-    cutout = _remove_edge_connected_background(
-        image,
-        tolerance=18,
-        blur_radius=0.35,
-    )
-    main_shape = _keep_largest_alpha_component(cutout, alpha_floor=10)
+    image = Image.open(source_path).convert("RGBA")
+    alpha = image.split()[-1]
+    alpha_min, alpha_max = alpha.getextrema()
+
+    if alpha_min < alpha_max:
+        # Respect authored transparency when present (ruby coin source uses
+        # transparent background). This avoids re-cutting and introducing
+        # opaque fringe artifacts.
+        main_shape = _keep_largest_alpha_component(image, alpha_floor=1)
+    else:
+        cutout = _remove_edge_connected_background(
+            image,
+            tolerance=18,
+            blur_radius=0.35,
+        )
+        main_shape = _keep_largest_alpha_component(cutout, alpha_floor=10)
     trimmed = _trim_transparency(main_shape)
     square_piece = _compose_piece_canvas(
         trimmed,
@@ -396,19 +442,31 @@ def _process_coin(source_name: str, output_name: str) -> None:
 def _process_dice_face(source_name: str, output_name: str) -> None:
     source_path = ASSETS_DIR / source_name
     output_path = SHESHBESH_DIR / output_name
-    image = Image.open(source_path)
-    cutout = _remove_edge_connected_background(
-        image,
-        tolerance=18,
-        blur_radius=0.3,
-    )
-    main_shape = _keep_largest_alpha_component(cutout, alpha_floor=8)
+    image = Image.open(source_path).convert("RGBA")
+    alpha = image.split()[-1]
+    alpha_min, alpha_max = alpha.getextrema()
+
+    if alpha_min < alpha_max:
+        # Some source faces (notably D1) include usable alpha but also
+        # translucent fringe noise. Use a strong alpha gate and keep only the
+        # largest connected component so the final die has clean edges.
+        gated_alpha = alpha.point(lambda v: 255 if v > 120 else 0)
+        masked = image.copy()
+        masked.putalpha(gated_alpha)
+        main_shape = _keep_largest_alpha_component(masked, alpha_floor=1)
+    else:
+        cutout = _remove_edge_connected_background(
+            image,
+            tolerance=18,
+            blur_radius=0.3,
+        )
+        main_shape = _keep_largest_alpha_component(cutout, alpha_floor=8)
     trimmed = _trim_transparency(main_shape)
     square = _compose_piece_canvas(
         trimmed,
         canvas_size=384,
-        fill_ratio=0.84,
-        bottom_padding_ratio=0.04,
+        fill_ratio=0.9,
+        bottom_padding_ratio=0.02,
     )
     _save_png(output_path, square)
     print(f"dice:  {source_name} -> {output_path.relative_to(ROOT)}")
@@ -483,35 +541,44 @@ def _ensure_sources_exist(paths: Iterable[Path]) -> None:
         raise FileNotFoundError(f"Missing required source assets:\n{missing_list}")
 
 
-def main() -> None:
-    required_paths = [ASSETS_DIR / name for name in SOURCE_PIECES]
-    required_paths.extend(ASSETS_DIR / name for name in SOURCE_COINS)
-    required_paths.extend(ASSETS_DIR / name for name in SOURCE_DICE)
-    required_paths.extend(ASSETS_DIR / name for name in SOURCE_RED_CHESS_PIECES)
-    required_paths.extend(ASSETS_DIR / name for name in SOURCE_BACKGAMMON_BOARDS)
-    required_paths.extend(
-        [
-            ASSETS_DIR / "boardPearl.png.png",
-            ASSETS_DIR / "HorizontalTimeBar.png.png",
-            ASSETS_DIR / "VerticalTimeBar.png.png",
-            ASSETS_DIR / "PearlBG.png.png",
-        ],
+def _resolve_source_name(*, label: str, candidates: Iterable[str]) -> str:
+    for source_name in candidates:
+        if (ASSETS_DIR / source_name).exists():
+            return source_name
+
+    candidate_list = "\n".join(f"- assets/{name}" for name in candidates)
+    raise FileNotFoundError(
+        f"Missing source asset for {label}. Tried:\n{candidate_list}"
     )
+
+
+def main() -> None:
+    required_paths = [
+        ASSETS_DIR / "boardPearl.png.png",
+        ASSETS_DIR / "HorizontalTimeBar.png.png",
+        ASSETS_DIR / "VerticalTimeBar.png.png",
+        ASSETS_DIR / "PearlBG.png.png",
+    ]
     _ensure_sources_exist(required_paths)
 
-    for source_name, output_name in SOURCE_PIECES.items():
+    for output_name, candidates in SOURCE_PIECES.items():
+        source_name = _resolve_source_name(label=output_name, candidates=candidates)
         _process_piece(source_name, output_name)
 
-    for source_name, output_name in SOURCE_RED_CHESS_PIECES.items():
+    for output_name, candidates in SOURCE_RED_CHESS_PIECES.items():
+        source_name = _resolve_source_name(label=output_name, candidates=candidates)
         _process_red_chess_piece(source_name, output_name)
 
-    for source_name, output_name in SOURCE_COINS.items():
+    for output_name, candidates in SOURCE_COINS.items():
+        source_name = _resolve_source_name(label=output_name, candidates=candidates)
         _process_coin(source_name, output_name)
 
-    for source_name, output_name in SOURCE_DICE.items():
+    for output_name, candidates in SOURCE_DICE.items():
+        source_name = _resolve_source_name(label=output_name, candidates=candidates)
         _process_dice_face(source_name, output_name)
 
-    for source_name, output_name in SOURCE_BACKGAMMON_BOARDS.items():
+    for output_name, candidates in SOURCE_BACKGAMMON_BOARDS.items():
+        source_name = _resolve_source_name(label=output_name, candidates=candidates)
         _process_backgammon_board(source_name, output_name)
 
     _process_board_image()
@@ -527,6 +594,17 @@ def main() -> None:
         tolerance=24,
         max_size=(260, 1200),
     )
+    for source_name, (output_name, max_size) in OPTIONAL_TIME_BAR_VARIANTS.items():
+        source_path = ASSETS_DIR / source_name
+        if not source_path.exists():
+            print(f"skip:  optional {source_name} not found")
+            continue
+        _process_ui_image(
+            source_name,
+            output_name,
+            tolerance=24,
+            max_size=max_size,
+        )
     _process_ui_image(
         "PearlBG.png.png",
         "background.png",

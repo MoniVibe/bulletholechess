@@ -10,8 +10,10 @@ class ChessBoardView extends StatelessWidget {
     this.boardAssetPath = AppAssets.chessBoardClassic,
     this.playableInsetRatio = AppAssets.chessBoardPlayableInsetRatio,
     this.playableSizeRatio = AppAssets.chessBoardPlayableSizeRatio,
-    this.pieceSprites = AppAssets.pieceSprites,
-    this.pieceTint,
+    this.whitePieceSprites = AppAssets.pieceSprites,
+    this.blackPieceSprites = AppAssets.pieceSprites,
+    this.invertWhitePieceColors = false,
+    this.invertBlackPieceColors = false,
     this.selectedSquare,
     this.legalTargets = const <String>{},
     this.lastMoveFrom,
@@ -30,8 +32,10 @@ class ChessBoardView extends StatelessWidget {
   final String boardAssetPath;
   final double playableInsetRatio;
   final double playableSizeRatio;
-  final Map<String, String> pieceSprites;
-  final Color? pieceTint;
+  final Map<String, String> whitePieceSprites;
+  final Map<String, String> blackPieceSprites;
+  final bool invertWhitePieceColors;
+  final bool invertBlackPieceColors;
   final String? selectedSquare;
   final Set<String> legalTargets;
   final String? lastMoveFrom;
@@ -44,14 +48,19 @@ class ChessBoardView extends StatelessWidget {
   final String? queuedMoveTo;
   final ValueChanged<String> onSquareTap;
 
-  static const _files = 'abcdefgh';
+  static const String _files = 'abcdefgh';
+  static const TextStyle _pieceFallbackStyle = TextStyle(
+    fontSize: 30,
+    fontWeight: FontWeight.w700,
+    color: Color(0xFF121212),
+  );
 
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
+        boxShadow: <BoxShadow>[
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.17),
             blurRadius: 18,
@@ -71,7 +80,7 @@ class ChessBoardView extends StatelessWidget {
             );
 
             return Stack(
-              children: [
+              children: <Widget>[
                 Positioned.fill(
                   child: Image.asset(
                     boardAssetPath,
@@ -97,14 +106,9 @@ class ChessBoardView extends StatelessWidget {
                           crossAxisCount: 8,
                         ),
                     itemBuilder: (context, index) {
-                      final boardIndex = playerColor == 'w'
-                          ? index
-                          : 63 - index;
-                      final row = boardIndex ~/ 8;
-                      final col = boardIndex % 8;
-                      final square = '${_files[col]}${8 - row}';
+                      final square = _squareForDisplayedCell(index);
                       final piece = pieces[square];
-                      final isDarkSquare = (row + col).isOdd;
+                      final isDarkSquare = ((index ~/ 8) + (index % 8)).isOdd;
                       final isSelected = selectedSquare == square;
                       final isTarget = legalTargets.contains(square);
                       final isPrimaryMoveSquare =
@@ -141,7 +145,7 @@ class ChessBoardView extends StatelessWidget {
                             0xFF00BCD4,
                           ).withValues(alpha: 0.14),
                           child: Stack(
-                            children: [
+                            children: <Widget>[
                               if (isSelected)
                                 Positioned.fill(
                                   child: DecoratedBox(
@@ -226,50 +230,63 @@ class ChessBoardView extends StatelessWidget {
     );
   }
 
+  String _squareForDisplayedCell(int index) {
+    final boardIndex = playerColor == 'w' ? index : 63 - index;
+    final row = boardIndex ~/ 8;
+    final col = boardIndex % 8;
+    return '${_files[col]}${8 - row}';
+  }
+
   Widget _buildPieceSprite(String piece) {
-    final spritePath = pieceSprites[piece];
+    final isWhitePiece = piece == piece.toUpperCase();
+    final spriteLookup = isWhitePiece ? whitePieceSprites : blackPieceSprites;
+    final spritePath = spriteLookup[piece];
     if (spritePath == null) {
-      return Center(
-        child: Text(
-          piece,
-          style: const TextStyle(
-            fontSize: 30,
-            fontWeight: FontWeight.w700,
-            color: Color(0xFF121212),
-          ),
-        ),
-      );
+      return Center(child: Text(piece, style: _pieceFallbackStyle));
     }
 
-    Widget image = Image.asset(
+    Widget sprite = Image.asset(
       spritePath,
       fit: BoxFit.contain,
       filterQuality: FilterQuality.medium,
       cacheWidth: 256,
       cacheHeight: 256,
       errorBuilder: (context, error, stackTrace) {
-        return Center(
-          child: Text(
-            piece,
-            style: const TextStyle(
-              fontSize: 30,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF121212),
-            ),
-          ),
-        );
+        return Center(child: Text(piece, style: _pieceFallbackStyle));
       },
     );
 
-    if (pieceTint != null) {
-      image = ColorFiltered(
-        colorFilter: ColorFilter.mode(
-          pieceTint!.withValues(alpha: 0.28),
-          BlendMode.overlay,
-        ),
-        child: image,
+    final shouldInvert = isWhitePiece
+        ? invertWhitePieceColors
+        : invertBlackPieceColors;
+    if (shouldInvert) {
+      sprite = ColorFiltered(
+        colorFilter: const ColorFilter.matrix(<double>[
+          -1,
+          0,
+          0,
+          0,
+          255,
+          0,
+          -1,
+          0,
+          0,
+          255,
+          0,
+          0,
+          -1,
+          0,
+          255,
+          0,
+          0,
+          0,
+          1,
+          0,
+        ]),
+        child: sprite,
       );
     }
-    return image;
+
+    return sprite;
   }
 }

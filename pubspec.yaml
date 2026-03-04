@@ -37,6 +37,8 @@ dependencies:
   chess: ^0.8.1
   web_socket_channel: ^3.0.3
   http: ^1.2.2
+  bullethole_shared:
+    path: ../bullethole-shared
 
 dev_dependencies:
   flutter_test:
@@ -63,7 +65,6 @@ flutter:
   assets:
     - assets/generated/ui/
     - assets/generated/pieces/
-    - assets/generated/sheshbesh/
     - assets/Settings.png
     - assets/Newgame.png
     - assets/rematch.png
