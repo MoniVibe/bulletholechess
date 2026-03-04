@@ -90,11 +90,7 @@ class ChessAiGameController extends ChangeNotifier {
   }
 
   bool get canPlayerInteract {
-    return !_aiThinking &&
-        !isGameOver &&
-        turnColor == _playerColor &&
-        cooldownRemaining(_playerColor).inMilliseconds <= 0 &&
-        ChessRules.hasAnyLegalMove(_game, _playerColor);
+    return _canColorMoveNow(_playerColor);
   }
 
   String get statusText {
@@ -108,26 +104,27 @@ class ChessAiGameController extends ChangeNotifier {
       }
       return 'Game over.';
     }
-    if (_aiThinking) {
-      if (hasQueuedMove) {
-        return 'AI is thinking... Queued $queuedMoveLabel.';
-      }
-      return 'AI is thinking...';
-    }
-
-    if (turnColor == _playerColor) {
-      final remaining = cooldownRemaining(_playerColor);
+    final remaining = cooldownRemaining(_playerColor);
+    if (hasQueuedMove) {
       if (remaining.inMilliseconds > 0) {
-        return 'Cooling down (${ChessRules.formatDuration(remaining)}).';
+        return 'Queued $queuedMoveLabel (${ChessRules.formatDuration(remaining)}).';
       }
-      return 'Your move.';
+      return 'Queued $queuedMoveLabel. Executing...';
     }
-
+    if (remaining.inMilliseconds > 0) {
+      return 'Cooling down (${ChessRules.formatDuration(remaining)}).';
+    }
+    if (ChessRules.hasAnyLegalMove(_game, _playerColor)) {
+      return _aiThinking ? 'Your move. AI is planning...' : 'Your move.';
+    }
     final aiRemaining = cooldownRemaining(aiColor);
     if (aiRemaining.inMilliseconds > 0) {
       return 'AI cooling down (${ChessRules.formatDuration(aiRemaining)}).';
     }
-    return 'AI move.';
+    if (_aiThinking) {
+      return 'AI is thinking...';
+    }
+    return 'Waiting for legal moves.';
   }
 
   void startNewGame({required bool playerAsWhite, Duration? cooldownDuration}) {
@@ -154,18 +151,17 @@ class ChessAiGameController extends ChangeNotifier {
 
   void tapSquare(String square) {
     final canQueuePlannedMove =
-        !isGameOver &&
-        (_aiThinking ||
-            turnColor != _playerColor ||
-            cooldownRemaining(_playerColor).inMilliseconds > 0);
+        !isGameOver && cooldownRemaining(_playerColor).inMilliseconds > 0;
     final canHandleTap = canPlayerInteract || canQueuePlannedMove;
     if (!canHandleTap) {
-      if (!isGameOver && turnColor == _playerColor) {
+      if (!isGameOver) {
         final remaining = cooldownRemaining(_playerColor);
         if (remaining.inMilliseconds > 0) {
           _feedback = 'Cooling down (${ChessRules.formatDuration(remaining)}).';
-          notifyListeners();
+        } else {
+          _feedback = 'No legal moves available.';
         }
+        notifyListeners();
       }
       return;
     }
@@ -238,11 +234,12 @@ class ChessAiGameController extends ChangeNotifier {
     required String to,
     required String promotion,
   }) {
-    final moved = _game.move(<String, String>{
-      'from': from,
-      'to': to,
-      'promotion': promotion,
-    });
+    final moved = _applyMoveForColor(
+      color: _playerColor,
+      from: from,
+      to: to,
+      promotion: promotion,
+    );
     if (!moved) {
       _feedback = 'Move could not be applied.';
       notifyListeners();
@@ -263,10 +260,20 @@ class ChessAiGameController extends ChangeNotifier {
   }
 
   void _scheduleAiMoveIfNeeded() {
-    if (_disposed || isGameOver || turnColor != aiColor) {
+    if (_disposed || isGameOver) {
       return;
     }
-    _cancelAiMoveTimer();
+    if (_aiThinking || _aiMoveTimer != null) {
+      return;
+    }
+    // Keep opening behavior familiar: white starts when no move was made yet.
+    if (_game.getHistory().isEmpty && turnColor != aiColor) {
+      return;
+    }
+    if (!ChessRules.hasAnyLegalMove(_game, aiColor)) {
+      return;
+    }
+
     _aiThinking = true;
     var delay = aiMoveDelay;
     final cooldown = cooldownRemaining(aiColor);
@@ -278,10 +285,11 @@ class ChessAiGameController extends ChangeNotifier {
   }
 
   void _performAiMove() {
+    _aiMoveTimer = null;
     if (_disposed) {
       return;
     }
-    if (isGameOver || turnColor != aiColor) {
+    if (isGameOver || !ChessRules.hasAnyLegalMove(_game, aiColor)) {
       _aiThinking = false;
       notifyListeners();
       return;
@@ -293,18 +301,23 @@ class ChessAiGameController extends ChangeNotifier {
       return;
     }
 
-    final aiMove = _aiEngine.chooseMove(_game);
+    final aiMove = ChessRules.withTurn<EngineMove?>(
+      _game,
+      aiColor,
+      () => _aiEngine.chooseMove(_game),
+    );
     if (aiMove == null) {
       _aiThinking = false;
       notifyListeners();
       return;
     }
 
-    final moved = _game.move(<String, String>{
-      'from': aiMove.from,
-      'to': aiMove.to,
-      'promotion': aiMove.promotion,
-    });
+    final moved = _applyMoveForColor(
+      color: aiColor,
+      from: aiMove.from,
+      to: aiMove.to,
+      promotion: aiMove.promotion,
+    );
     _aiThinking = false;
     if (!moved) {
       _feedback = 'AI move failed.';
@@ -316,9 +329,8 @@ class ChessAiGameController extends ChangeNotifier {
     _aiLastMoveTo = aiMove.to;
     _startCooldown(aiColor);
     _feedback = null;
-    if (_tryExecuteQueuedMoveIfReady()) {
-      return;
-    }
+    _tryExecuteQueuedMoveIfReady();
+    _scheduleAiMoveIfNeeded();
     notifyListeners();
   }
 
@@ -354,11 +366,7 @@ class ChessAiGameController extends ChangeNotifier {
   }
 
   bool _tryExecuteQueuedMoveIfReady() {
-    if (_disposed ||
-        !hasQueuedMove ||
-        _aiThinking ||
-        isGameOver ||
-        turnColor != _playerColor) {
+    if (_disposed || !hasQueuedMove || isGameOver) {
       return false;
     }
     if (cooldownRemaining(_playerColor).inMilliseconds > 0) {
@@ -390,6 +398,32 @@ class ChessAiGameController extends ChangeNotifier {
           validatedMove['promotion'] as String? ?? ChessRules.defaultPromotion,
     );
     return true;
+  }
+
+  bool _canColorMoveNow(String color) {
+    if (isGameOver) {
+      return false;
+    }
+    return cooldownRemaining(color).inMilliseconds <= 0 &&
+        ChessRules.hasAnyLegalMove(_game, color);
+  }
+
+  bool _applyMoveForColor({
+    required String color,
+    required String from,
+    required String to,
+    required String promotion,
+  }) {
+    final moved = ChessRules.withTurn<bool>(
+      _game,
+      color,
+      () => _game.move(<String, String>{
+        'from': from,
+        'to': to,
+        'promotion': promotion,
+      }),
+    );
+    return moved;
   }
 
   void _queueMove({

@@ -564,9 +564,13 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
   }
 
   List<DropdownMenuItem<String>> _chessBoardDropdownItems() {
-    final board = SkinCatalog.chessBoardPearl;
-    return <DropdownMenuItem<String>>[
-      DropdownMenuItem<String>(value: board.id, child: Text(board.label)),
-    ];
+    return SkinCatalog.chessBoardSkins
+        .map(
+          (board) => DropdownMenuItem<String>(
+            value: board.id,
+            child: Text(board.label),
+          ),
+        )
+        .toList(growable: false);
   }
 }

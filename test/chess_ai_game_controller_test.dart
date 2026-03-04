@@ -26,11 +26,13 @@ void main() {
     expect(controller.playerColor, 'b');
     expect(controller.aiThinking, isTrue);
 
-    await Future<void>.delayed(const Duration(milliseconds: 20));
+    final deadline = DateTime.now().add(const Duration(seconds: 2));
+    while (controller.history.isEmpty && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
 
-    expect(controller.turnColor, 'b');
+    expect(controller.history, isNotEmpty);
     expect(controller.canPlayerInteract, isTrue);
-    expect(controller.aiThinking, isFalse);
   });
 
   test(
@@ -51,14 +53,14 @@ void main() {
       controller.tapSquare('e2');
       controller.tapSquare('e4');
 
-      // Wait for AI reply.
+      // Wait for AI reply to be applied.
       final deadline = DateTime.now().add(const Duration(seconds: 2));
-      while (controller.aiThinking && DateTime.now().isBefore(deadline)) {
+      while (controller.history.length < 2 &&
+          DateTime.now().isBefore(deadline)) {
         await Future<void>.delayed(const Duration(milliseconds: 10));
       }
 
-      expect(controller.aiThinking, isFalse);
-      expect(controller.turnColor, 'w');
+      expect(controller.history.length, greaterThanOrEqualTo(2));
       expect(controller.canPlayerInteract, isTrue);
       expect(controller.cooldownRemaining('w'), Duration.zero);
     },
@@ -92,6 +94,36 @@ void main() {
       expect(controller.hasQueuedMove, isFalse);
       expect(controller.boardPieces['f3'], 'N');
       expect(controller.turnColor, 'b');
+    },
+  );
+
+  test(
+    'player can make consecutive moves when AI does not act before cooldown ends',
+    () async {
+      final controller = ChessAiGameController(
+        aiMoveDelay: const Duration(seconds: 5),
+        initialCooldownDuration: const Duration(seconds: 1),
+        aiEngine: _DeterministicAiEngine(),
+      );
+      addTearDown(controller.dispose);
+
+      controller.startNewGame(
+        playerAsWhite: true,
+        cooldownDuration: const Duration(seconds: 1),
+      );
+
+      controller.tapSquare('e2');
+      controller.tapSquare('e4');
+
+      await Future<void>.delayed(const Duration(milliseconds: 1200));
+
+      expect(controller.canPlayerInteract, isTrue);
+      controller.tapSquare('g1');
+      controller.tapSquare('f3');
+
+      expect(controller.boardPieces['f3'], 'N');
+      expect(controller.playerLastMoveFrom, 'g1');
+      expect(controller.playerLastMoveTo, 'f3');
     },
   );
 }

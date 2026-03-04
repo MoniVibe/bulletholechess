@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import 'app_assets.dart';
@@ -49,10 +51,8 @@ class ChessBoardView extends StatelessWidget {
   final ValueChanged<String> onSquareTap;
 
   static const String _files = 'abcdefgh';
-  // Visual-only scale so piece taps/layout remain stable while art appears bigger.
+  // Visual-only scale while keeping the piece anchor centered in each square.
   static const double _pieceVisualScale = 1.4;
-  // Lift oversized art slightly so bottoms stay inside square bounds.
-  static const double _pieceVerticalOffsetPx = -10;
   static const TextStyle _pieceFallbackStyle = TextStyle(
     fontSize: 30,
     fontWeight: FontWeight.w700,
@@ -200,18 +200,22 @@ class ChessBoardView extends StatelessWidget {
                                 ),
                               if (piece != null)
                                 Positioned.fill(
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(1.5),
-                                    child: Transform.translate(
-                                      offset: const Offset(
-                                        0,
-                                        _pieceVerticalOffsetPx,
-                                      ),
-                                      child: Transform.scale(
-                                        scale: _pieceVisualScale,
-                                        child: _buildPieceSprite(piece),
-                                      ),
-                                    ),
+                                  child: LayoutBuilder(
+                                    builder: (context, constraints) {
+                                      final squareSize = math.min(
+                                        constraints.maxWidth,
+                                        constraints.maxHeight,
+                                      );
+                                      final pieceSize =
+                                          squareSize * _pieceVisualScale;
+                                      return Center(
+                                        child: SizedBox(
+                                          width: pieceSize,
+                                          height: pieceSize,
+                                          child: _buildPieceSprite(piece),
+                                        ),
+                                      );
+                                    },
                                   ),
                                 ),
                               Positioned(
