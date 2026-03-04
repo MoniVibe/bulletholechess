@@ -6,13 +6,8 @@ import 'package:bullethole_shared/bullethole_shared.dart';
 import 'package:chess/chess.dart' as chess;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'chess_rules.dart';
-
-enum OnlineConnectionState { disconnected, connecting, connected }
-
-enum BackendHealthState { unknown, checking, healthy, unhealthy }
 
 class OnlineGameController extends ChangeNotifier {
   static const String _defaultPromotion = ChessRules.defaultPromotion;
@@ -27,6 +22,10 @@ class OnlineGameController extends ChangeNotifier {
   }) : _cooldownDuration = initialCooldownDuration {
     _httpClient = httpClient ?? http.Client();
     _ownsHttpClient = httpClient == null;
+    _transportClient = MultiplayerTransportClient(
+      httpClient: _httpClient,
+      requestTimeout: _defaultHealthTimeout,
+    );
     _backendHealthChecker = BackendHealthChecker(
       httpClient: _httpClient,
       defaultTimeout: _defaultHealthTimeout,
@@ -47,8 +46,7 @@ class OnlineGameController extends ChangeNotifier {
   late final http.Client _httpClient;
   late final bool _ownsHttpClient;
   late final BackendHealthChecker _backendHealthChecker;
-  WebSocketChannel? _channel;
-  StreamSubscription<dynamic>? _subscription;
+  late final MultiplayerTransportClient _transportClient;
 
   OnlineConnectionState _connectionState = OnlineConnectionState.disconnected;
   Duration _cooldownDuration;
@@ -363,60 +361,27 @@ class OnlineGameController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final baseUri = MultiplayerClientUtils.parseApiBaseUri(apiBaseUrl);
-      final payload = <String, dynamic>{
-        'name': normalizedName,
-        'pieceSkinId': _myPieceSkinId,
-      };
-      if (cooldownSeconds != null) {
-        payload['cooldownSeconds'] = cooldownSeconds;
-      }
-
-      final response = await http.post(
-        baseUri.resolve('/api/matches/join'),
-        headers: const {'content-type': 'application/json'},
-        body: jsonEncode(payload),
+      final joined = await _transportClient.joinMatch(
+        apiBaseUrl: apiBaseUrl,
+        displayName: normalizedName,
+        pieceSkinId: _myPieceSkinId,
+        cooldownSeconds: cooldownSeconds,
       );
-
-      final body = MultiplayerClientUtils.decodeJsonMap(response.body);
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        _logEvent(
-          'matchmaking_http_error',
-          details: <String, Object?>{
-            'status': response.statusCode,
-            'body': response.body,
-          },
-        );
-        throw Exception(
-          body['error'] ?? 'Matchmaking failed (${response.statusCode}).',
-        );
-      }
-
-      final matchId = body['matchId'] as String?;
-      final playerId = body['playerId'] as String?;
-      final wsPath = body['wsPath'] as String? ?? '/ws';
-      final responseCooldown = MultiplayerClientUtils.readInt(
-        body['cooldownSeconds'],
-      );
-      if (responseCooldown != null && responseCooldown > 0) {
-        _cooldownDuration = Duration(seconds: responseCooldown);
-      }
-
-      if (matchId == null || playerId == null) {
-        throw Exception('Invalid match response from server.');
+      if (joined.cooldownSeconds != null && joined.cooldownSeconds! > 0) {
+        _cooldownDuration = Duration(seconds: joined.cooldownSeconds!);
       }
 
       await _connectWebSocket(
-        baseUri: baseUri,
-        wsPath: wsPath,
-        matchId: matchId,
-        playerId: playerId,
+        baseUri: joined.baseUri,
+        wsPath: joined.wsPath,
+        matchId: joined.matchId,
+        playerId: joined.playerId,
       );
       _logEvent(
         'matchmaking_success',
         details: <String, Object?>{
-          'matchId': matchId,
-          'playerId': playerId,
+          'matchId': joined.matchId,
+          'playerId': joined.playerId,
           'cooldownSeconds': _cooldownDuration.inSeconds,
         },
       );
@@ -457,10 +422,9 @@ class OnlineGameController extends ChangeNotifier {
 
     try {
       final uri = Uri.parse(serverUrl.trim());
-      final channel = WebSocketChannel.connect(uri);
-      _channel = channel;
-      _subscription = channel.stream.listen(
-        _onMessage,
+      await _transportClient.connectToUri(
+        uri: uri,
+        onMessage: _onMessage,
         onError: (Object error) {
           _feedback = _friendlyNetworkError(
             error,
@@ -474,7 +438,6 @@ class OnlineGameController extends ChangeNotifier {
           _feedback = 'Disconnected from server.';
           notifyListeners();
         },
-        cancelOnError: true,
       );
 
       _send(<String, dynamic>{
@@ -504,10 +467,7 @@ class OnlineGameController extends ChangeNotifier {
     _moveInFlight = false;
     _clearSelection();
     _clearQueuedMove();
-    await _subscription?.cancel();
-    _subscription = null;
-    await _channel?.sink.close();
-    _channel = null;
+    await _transportClient.disconnect();
     _connectionState = OnlineConnectionState.disconnected;
     _status = 'disconnected';
     _matchId = null;
@@ -846,31 +806,13 @@ class OnlineGameController extends ChangeNotifier {
     );
 
     try {
-      final baseUri = MultiplayerClientUtils.parseApiBaseUri(apiBaseUrl);
-      final query = <String, String>{'limit': '$normalizedLimit'};
-      if (_matchId?.isNotEmpty ?? false) {
-        query['matchId'] = _matchId!;
-      }
-      final response = await _httpClient
-          .get(baseUri.resolve('/debug/logs').replace(queryParameters: query))
-          .timeout(_defaultHealthTimeout);
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception('Server debug logs failed (${response.statusCode})');
-      }
-
-      final body = MultiplayerClientUtils.decodeJsonMap(response.body);
-      final items = body['items'];
-      if (items is! List) {
-        _logEvent('server_logs_pull_empty');
-        return 0;
-      }
-
+      final items = await _transportClient.fetchServerDebugLogs(
+        apiBaseUrl: apiBaseUrl,
+        matchId: _matchId,
+        limit: normalizedLimit,
+      );
       var appended = 0;
-      for (final raw in items) {
-        if (raw is! Map) {
-          continue;
-        }
-        final map = Map<String, dynamic>.from(raw);
+      for (final map in items) {
         _appendServerLogLine(map);
         appended += 1;
       }
@@ -995,21 +937,14 @@ class OnlineGameController extends ChangeNotifier {
     );
     await disconnect(notify: false);
 
-    final wsUri = MultiplayerClientUtils.websocketUriFromBase(
-      baseUri: baseUri,
-      wsPath: wsPath,
-      queryParameters: <String, String>{
-        'matchId': matchId,
-        'playerId': playerId,
-      },
-    );
-
     try {
       _matchId = matchId;
-      final channel = WebSocketChannel.connect(wsUri);
-      _channel = channel;
-      _subscription = channel.stream.listen(
-        _onMessage,
+      final wsUri = await _transportClient.connectSocket(
+        baseUri: baseUri,
+        wsPath: wsPath,
+        matchId: matchId,
+        playerId: playerId,
+        onMessage: _onMessage,
         onError: (Object error) {
           _logEvent(
             'ws_stream_error',
@@ -1028,11 +963,13 @@ class OnlineGameController extends ChangeNotifier {
           _feedback = 'Disconnected from server.';
           notifyListeners();
         },
-        cancelOnError: true,
       );
 
       _connectionState = OnlineConnectionState.connected;
-      _logEvent('ws_connected', details: <String, Object?>{'matchId': matchId});
+      _logEvent(
+        'ws_connected',
+        details: <String, Object?>{'matchId': matchId, 'uri': wsUri.toString()},
+      );
       notifyListeners();
     } catch (error) {
       _logEvent(
@@ -1408,7 +1345,7 @@ class OnlineGameController extends ChangeNotifier {
   }
 
   void _send(Map<String, dynamic> payload) {
-    _channel?.sink.add(jsonEncode(payload));
+    _transportClient.sendJson(payload);
   }
 
   int _estimatedServerNowMs() {
@@ -1468,6 +1405,9 @@ class OnlineGameController extends ChangeNotifier {
     Object error, {
     required String fallback,
   }) {
+    if (error is MultiplayerTransportException) {
+      return error.message;
+    }
     if (error is SocketException) {
       return 'Cannot reach backend (connection refused). Check Backend URL or start the server.';
     }
