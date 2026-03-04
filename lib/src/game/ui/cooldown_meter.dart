@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import 'app_assets.dart';
+
 class CooldownMeter extends StatefulWidget {
   const CooldownMeter({
     required this.label,
@@ -125,8 +127,6 @@ class _CooldownMeterState extends State<CooldownMeter>
   @override
   Widget build(BuildContext context) {
     final clampedRatio = _effectiveRatio();
-    final ready = clampedRatio == 0.0;
-    final fillColor = ready ? const Color(0xFF2ECC71) : widget.activeColor;
 
     return AnimatedBuilder(
       animation: _pulse,
@@ -135,117 +135,163 @@ class _CooldownMeterState extends State<CooldownMeter>
 
         return DecoratedBox(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFD5DEE8), width: 1.2),
+            borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF0F172A).withValues(alpha: 0.06),
-                blurRadius: 10,
-                offset: const Offset(0, 2),
+                color: Colors.black.withValues(alpha: 0.14),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
               ),
               BoxShadow(
-                color: widget.flashTint.withValues(alpha: 0.2 * glow),
-                blurRadius: 8 + (18 * glow),
-                spreadRadius: 0.4 + (2.8 * glow),
+                color: widget.flashTint.withValues(alpha: 0.22 * glow),
+                blurRadius: 12 + (22 * glow),
+                spreadRadius: 0.5 + (3.5 * glow),
               ),
             ],
-            gradient: const LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFFFDFEFE), Color(0xFFF4F7FA)],
-            ),
           ),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: Padding(
-                  padding: const EdgeInsets.all(2.5),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(11.5),
-                    child: DecoratedBox(
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [Color(0xFFEBF1F7), Color(0xFFDCE5EF)],
-                        ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                // "Spent" portion remains visible as a muted bar for readability.
+                ColorFiltered(
+                  colorFilter: const ColorFilter.matrix(<double>[
+                    0.2126,
+                    0.7152,
+                    0.0722,
+                    0,
+                    0,
+                    0.2126,
+                    0.7152,
+                    0.0722,
+                    0,
+                    0,
+                    0.2126,
+                    0.7152,
+                    0.0722,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0.7,
+                    0,
+                  ]),
+                  child: Image.asset(
+                    AppAssets.horizontalTimeBar,
+                    fit: BoxFit.fill,
+                    filterQuality: FilterQuality.medium,
+                  ),
+                ),
+                if (clampedRatio > 0)
+                  ClipRect(
+                    clipper: _HorizontalProgressClipper(clampedRatio),
+                    child: ColorFiltered(
+                      colorFilter: ColorFilter.mode(
+                        widget.activeColor.withValues(alpha: 0.22),
+                        BlendMode.hardLight,
                       ),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: FractionallySizedBox(
-                          widthFactor: clampedRatio,
-                          heightFactor: 1,
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.centerLeft,
-                                end: Alignment.centerRight,
-                                colors: [
-                                  fillColor.withValues(alpha: 0.72),
-                                  fillColor.withValues(alpha: 0.98),
-                                ],
-                              ),
-                            ),
+                      child: Image.asset(
+                        AppAssets.horizontalTimeBar,
+                        fit: BoxFit.fill,
+                        filterQuality: FilterQuality.high,
+                      ),
+                    ),
+                  ),
+                if (widget.readyToFlash)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        // Strong pulse for "ready" so players catch it instantly.
+                        decoration: BoxDecoration(
+                          color: widget.flashTint.withValues(
+                            alpha: 0.24 + (0.6 * _pulse.value),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ),
-              if (widget.readyToFlash)
                 Positioned.fill(
-                  child: IgnorePointer(
-                    child: DecoratedBox(
-                      // Stronger pulse for "cooldown ready" so it reads instantly.
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                        color: widget.flashTint.withValues(
-                          alpha: 0.26 + (0.62 * _pulse.value),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    child: Row(
+                      children: [
+                        Text(
+                          widget.label,
+                          style: TextStyle(
+                            fontFamily: 'Orbitron',
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.25,
+                            fontSize: 13,
+                            color: Colors.white.withValues(alpha: 0.96),
+                            shadows: const [
+                              Shadow(
+                                color: Colors.black87,
+                                blurRadius: 3,
+                                offset: Offset(0, 1),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
+                        if (widget.isPlayerSide) ...[
+                          const SizedBox(width: 5),
+                          Icon(
+                            Icons.person,
+                            size: 12,
+                            color: Colors.white.withValues(alpha: 0.96),
+                            shadows: const <Shadow>[
+                              Shadow(
+                                color: Colors.black87,
+                                blurRadius: 3,
+                                offset: Offset(0, 1),
+                              ),
+                            ],
+                          ),
+                        ],
+                        const Spacer(),
+                        Text(
+                          widget.timeLabel,
+                          style: TextStyle(
+                            fontFamily: 'Orbitron',
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                            color: Colors.white.withValues(alpha: 0.96),
+                            shadows: const [
+                              Shadow(
+                                color: Colors.black87,
+                                blurRadius: 3,
+                                offset: Offset(0, 1),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-              Positioned.fill(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Row(
-                    children: [
-                      Text(
-                        widget.label,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.2,
-                          fontSize: 12,
-                          color: Color(0xFF1F2933),
-                        ),
-                      ),
-                      if (widget.isPlayerSide) ...[
-                        const SizedBox(width: 5),
-                        const Icon(
-                          Icons.person,
-                          size: 12,
-                          color: Color(0xFF334155),
-                        ),
-                      ],
-                      const Spacer(),
-                      Text(
-                        widget.timeLabel,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                          color: Color(0xFF1F2933),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
     );
+  }
+}
+
+class _HorizontalProgressClipper extends CustomClipper<Rect> {
+  const _HorizontalProgressClipper(this.progressRatio);
+
+  final double progressRatio;
+
+  @override
+  Rect getClip(Size size) {
+    final clamped = progressRatio.clamp(0.0, 1.0);
+    return Rect.fromLTWH(0, 0, size.width * clamped, size.height);
+  }
+
+  @override
+  bool shouldReclip(covariant _HorizontalProgressClipper oldClipper) {
+    return oldClipper.progressRatio != progressRatio;
   }
 }

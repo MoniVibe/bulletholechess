@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'app_assets.dart';
+
 class ChessBoardView extends StatelessWidget {
   const ChessBoardView({
     required this.pieces,
@@ -41,145 +43,212 @@ class ChessBoardView extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.12),
-            blurRadius: 14,
-            offset: const Offset(0, 8),
+            color: Colors.black.withValues(alpha: 0.17),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
           ),
         ],
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
-        child: GridView.builder(
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: 64,
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 8,
-          ),
-          itemBuilder: (context, index) {
-            final boardIndex = playerColor == 'w' ? index : 63 - index;
-            final row = boardIndex ~/ 8;
-            final col = boardIndex % 8;
-            final square = '${_files[col]}${8 - row}';
-            final piece = pieces[square];
-            final isDarkSquare = (row + col).isOdd;
-            final isSelected = selectedSquare == square;
-            final isTarget = legalTargets.contains(square);
-            final isPrimaryMoveSquare =
-                square == lastMoveFrom || square == lastMoveTo;
-            final isSecondaryMoveSquare =
-                square == secondaryMoveFrom || square == secondaryMoveTo;
-            final isQueuedSquare =
-                square == queuedMoveFrom || square == queuedMoveTo;
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final playableRect = Rect.fromLTWH(
+              constraints.maxWidth * AppAssets.boardPlayableInsetRatio,
+              constraints.maxHeight * AppAssets.boardPlayableInsetRatio,
+              constraints.maxWidth * AppAssets.boardPlayableSizeRatio,
+              constraints.maxHeight * AppAssets.boardPlayableSizeRatio,
+            );
 
-            final baseColor = isDarkSquare
-                ? const Color(0xFF8D6E63)
-                : const Color(0xFFE8D7C7);
-            Color squareColor = baseColor;
-            if (isPrimaryMoveSquare) {
-              squareColor = lastMoveHighlightColor;
-            }
-            if (isSecondaryMoveSquare) {
-              squareColor = isPrimaryMoveSquare
-                  ? Color.lerp(
-                      lastMoveHighlightColor,
-                      secondaryMoveHighlightColor,
-                      0.5,
-                    )!
-                  : secondaryMoveHighlightColor;
-            }
-
-            return Material(
-              color: squareColor,
-              child: InkWell(
-                onTap: () => onSquareTap(square),
-                child: Stack(
-                  children: [
-                    if (isSelected)
-                      Positioned.fill(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                              color: const Color(0xFF2196F3),
-                              width: 3,
-                            ),
-                          ),
+            return Stack(
+              children: [
+                Positioned.fill(
+                  child: Image.asset(
+                    AppAssets.boardFrame,
+                    fit: BoxFit.fill,
+                    filterQuality: FilterQuality.high,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const DecoratedBox(
+                        decoration: BoxDecoration(color: Color(0xFFDFD9CE)),
+                      );
+                    },
+                  ),
+                ),
+                Positioned(
+                  left: playableRect.left,
+                  top: playableRect.top,
+                  width: playableRect.width,
+                  height: playableRect.height,
+                  child: GridView.builder(
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: 64,
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 8,
                         ),
-                      ),
-                    if (isTarget)
-                      Center(
-                        child: piece == null
-                            ? Container(
-                                width: 14,
-                                height: 14,
-                                decoration: const BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: Color(0xCC1B5E20),
-                                ),
-                              )
-                            : Container(
-                                width: double.infinity,
-                                height: double.infinity,
-                                margin: const EdgeInsets.all(5),
-                                decoration: BoxDecoration(
-                                  border: Border.all(
-                                    color: const Color(0xCC1B5E20),
-                                    width: 2,
+                    itemBuilder: (context, index) {
+                      final boardIndex = playerColor == 'w'
+                          ? index
+                          : 63 - index;
+                      final row = boardIndex ~/ 8;
+                      final col = boardIndex % 8;
+                      final square = '${_files[col]}${8 - row}';
+                      final piece = pieces[square];
+                      final isDarkSquare = (row + col).isOdd;
+                      final isSelected = selectedSquare == square;
+                      final isTarget = legalTargets.contains(square);
+                      final isPrimaryMoveSquare =
+                          square == lastMoveFrom || square == lastMoveTo;
+                      final isSecondaryMoveSquare =
+                          square == secondaryMoveFrom ||
+                          square == secondaryMoveTo;
+                      final isQueuedSquare =
+                          square == queuedMoveFrom || square == queuedMoveTo;
+
+                      var squareOverlayColor = Colors.transparent;
+                      if (isPrimaryMoveSquare) {
+                        squareOverlayColor = lastMoveHighlightColor.withValues(
+                          alpha: 0.36,
+                        );
+                      }
+                      if (isSecondaryMoveSquare) {
+                        squareOverlayColor =
+                            (isPrimaryMoveSquare
+                                    ? Color.lerp(
+                                        lastMoveHighlightColor,
+                                        secondaryMoveHighlightColor,
+                                        0.5,
+                                      )
+                                    : secondaryMoveHighlightColor)!
+                                .withValues(alpha: 0.34);
+                      }
+
+                      return Material(
+                        color: squareOverlayColor,
+                        child: InkWell(
+                          onTap: () => onSquareTap(square),
+                          splashColor: const Color(
+                            0xFF00BCD4,
+                          ).withValues(alpha: 0.14),
+                          child: Stack(
+                            children: [
+                              if (isSelected)
+                                Positioned.fill(
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      border: Border.all(
+                                        color: const Color(0xFF1DE9B6),
+                                        width: 2.6,
+                                      ),
+                                    ),
                                   ),
                                 ),
-                              ),
-                      ),
-                    if (isQueuedSquare)
-                      Positioned.fill(
-                        child: Padding(
-                          padding: const EdgeInsets.all(4),
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: const Color(0xFF006064),
-                                width: 2,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    if (piece != null)
-                      Center(
-                        child: Text(
-                          piece,
-                          style: TextStyle(
-                            fontSize: 30,
-                            fontWeight: FontWeight.w700,
-                            color: piece == piece.toUpperCase()
-                                ? const Color(0xFFF6F1E7)
-                                : const Color(0xFF1A1A1A),
-                            shadows: const [
-                              Shadow(
-                                color: Colors.black26,
-                                blurRadius: 2,
-                                offset: Offset(0, 1),
+                              if (isTarget)
+                                Center(
+                                  child: piece == null
+                                      ? Container(
+                                          width: 14,
+                                          height: 14,
+                                          decoration: const BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: Color(0xCC00A676),
+                                          ),
+                                        )
+                                      : Container(
+                                          width: double.infinity,
+                                          height: double.infinity,
+                                          margin: const EdgeInsets.all(5),
+                                          decoration: BoxDecoration(
+                                            border: Border.all(
+                                              color: const Color(0xCC00A676),
+                                              width: 2,
+                                            ),
+                                          ),
+                                        ),
+                                ),
+                              if (isQueuedSquare)
+                                Positioned.fill(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(4),
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        border: Border.all(
+                                          color: const Color(0xFF4DD0E1),
+                                          width: 2,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              if (piece != null)
+                                Positioned.fill(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(1.5),
+                                    child: _buildPieceSprite(piece),
+                                  ),
+                                ),
+                              Positioned(
+                                right: 3,
+                                bottom: 1,
+                                child: Text(
+                                  square,
+                                  style: TextStyle(
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDarkSquare
+                                        ? Colors.white.withValues(alpha: 0.74)
+                                        : Colors.black.withValues(alpha: 0.52),
+                                  ),
+                                ),
                               ),
                             ],
                           ),
                         ),
-                      ),
-                    Positioned(
-                      right: 3,
-                      bottom: 1,
-                      child: Text(
-                        square,
-                        style: TextStyle(
-                          fontSize: 8,
-                          color: Colors.black.withValues(alpha: 0.35),
-                        ),
-                      ),
-                    ),
-                  ],
+                      );
+                    },
+                  ),
                 ),
-              ),
+              ],
             );
           },
         ),
       ),
+    );
+  }
+
+  Widget _buildPieceSprite(String piece) {
+    final spritePath = AppAssets.pieceSpriteFor(piece);
+    if (spritePath == null) {
+      return Center(
+        child: Text(
+          piece,
+          style: const TextStyle(
+            fontSize: 30,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF121212),
+          ),
+        ),
+      );
+    }
+
+    return Image.asset(
+      spritePath,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.medium,
+      cacheWidth: 256,
+      cacheHeight: 256,
+      errorBuilder: (context, error, stackTrace) {
+        return Center(
+          child: Text(
+            piece,
+            style: const TextStyle(
+              fontSize: 30,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF121212),
+            ),
+          ),
+        );
+      },
     );
   }
 }

@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../engine/local_game_controller.dart';
+import 'app_asset_icon.dart';
+import 'app_assets.dart';
 import 'chess_board_view.dart';
 import 'cooldown_meter.dart';
 import 'mode_switch.dart';
@@ -27,6 +29,7 @@ class _GameScreenState extends State<GameScreen> {
   bool _isGameMenuOpen = false;
   int _selectedCooldownSeconds = 3;
   _GameMode _mode = _GameMode.local;
+  bool _didPrecacheVisualAssets = false;
 
   @override
   void initState() {
@@ -43,32 +46,74 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_didPrecacheVisualAssets) {
+      return;
+    }
+    _didPrecacheVisualAssets = true;
+    _precacheVisualAssets();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
         return Scaffold(
-          body: SafeArea(
-            child: Column(
-              children: [
-                Expanded(
-                  child: IndexedStack(
-                    index: _mode == _GameMode.local ? 0 : 1,
-                    children: [
-                      _buildLocalView(),
-                      OnlineGamePanel(
-                        isOnlineMode: _mode == _GameMode.online,
-                        onModeChanged: (online) {
-                          setState(() {
-                            _mode = online ? _GameMode.online : _GameMode.local;
-                          });
-                        },
-                      ),
-                    ],
+          body: Stack(
+            children: [
+              Positioned.fill(
+                child: Image.asset(
+                  AppAssets.appBackground,
+                  fit: BoxFit.cover,
+                  filterQuality: FilterQuality.medium,
+                  errorBuilder: (context, error, stackTrace) {
+                    return const ColoredBox(color: Color(0xFFF2EFEA));
+                  },
+                ),
+              ),
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.white.withValues(alpha: 0.34),
+                        Colors.white.withValues(alpha: 0.14),
+                        Colors.black.withValues(alpha: 0.03),
+                      ],
+                      stops: const [0, 0.6, 1],
+                    ),
                   ),
                 ),
-              ],
-            ),
+              ),
+              SafeArea(
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: IndexedStack(
+                        index: _mode == _GameMode.local ? 0 : 1,
+                        children: [
+                          _buildLocalView(),
+                          OnlineGamePanel(
+                            isOnlineMode: _mode == _GameMode.online,
+                            onModeChanged: (online) {
+                              setState(() {
+                                _mode = online
+                                    ? _GameMode.online
+                                    : _GameMode.local;
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         );
       },
@@ -89,21 +134,23 @@ class _GameScreenState extends State<GameScreen> {
       child: Column(
         children: [
           Card(
-            elevation: 0,
-            color: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
             child: Column(
               children: [
                 ListTile(
                   dense: true,
                   title: Row(
                     children: [
-                      const Expanded(
+                      const AppAssetIcon(
+                        AppAssets.settingsIcon,
+                        fallbackIcon: Icons.settings,
+                        size: 22,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
                         child: Text(
                           'Game Menu',
-                          style: TextStyle(fontWeight: FontWeight.w700),
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w700),
                         ),
                       ),
                       CompactModeSwitch(
@@ -163,7 +210,11 @@ class _GameScreenState extends State<GameScreen> {
                           width: double.infinity,
                           child: FilledButton.icon(
                             onPressed: _showNewGamePrompt,
-                            icon: const Icon(Icons.refresh),
+                            icon: const AppAssetIcon(
+                              AppAssets.newGameIcon,
+                              fallbackIcon: Icons.refresh,
+                              size: 20,
+                            ),
                             label: const Text('New Game'),
                           ),
                         ),
@@ -199,7 +250,7 @@ class _GameScreenState extends State<GameScreen> {
             child: Center(
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  const barHeight = 34.0;
+                  const barHeight = 58.0;
                   const boardGap = 10.0;
                   final boardSize = math.min(
                     constraints.maxWidth,
@@ -297,7 +348,11 @@ class _GameScreenState extends State<GameScreen> {
                                     child: Center(
                                       child: FilledButton.icon(
                                         onPressed: _showNewGamePrompt,
-                                        icon: const Icon(Icons.play_arrow),
+                                        icon: const AppAssetIcon(
+                                          AppAssets.newGameIcon,
+                                          fallbackIcon: Icons.play_arrow,
+                                          size: 20,
+                                        ),
                                         label: const Text('Start New Game'),
                                       ),
                                     ),
@@ -335,11 +390,6 @@ class _GameScreenState extends State<GameScreen> {
           ),
           const SizedBox(height: 12),
           Card(
-            elevation: 0,
-            color: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Row(
@@ -425,5 +475,21 @@ class _GameScreenState extends State<GameScreen> {
     setState(() {
       _isGameMenuOpen = false;
     });
+  }
+
+  void _precacheVisualAssets() {
+    final uniqueAssets = <String>{
+      AppAssets.appBackground,
+      AppAssets.boardFrame,
+      AppAssets.horizontalTimeBar,
+      AppAssets.settingsIcon,
+      AppAssets.newGameIcon,
+      AppAssets.rematchIcon,
+      AppAssets.feedbackIcon,
+      ...AppAssets.pieceSprites.values,
+    };
+    for (final assetPath in uniqueAssets) {
+      precacheImage(AssetImage(assetPath), context);
+    }
   }
 }

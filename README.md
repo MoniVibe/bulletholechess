@@ -11,6 +11,18 @@ flutter pub get
 flutter run
 ```
 
+### Visual asset prep (new art drops)
+
+When replacing board/piece/time-bar images, preprocess them into transparent
+runtime assets:
+
+```bash
+python tool/prepare_visual_assets.py
+```
+
+Generated outputs are written to `assets/generated/` and are the files used by
+the app UI.
+
 ### Windows quick launch (double-click)
 
 - Double-click `launch-dev.cmd` from the repo root.

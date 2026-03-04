@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../engine/online_game_controller.dart';
+import 'app_asset_icon.dart';
+import 'app_assets.dart';
 import 'chess_board_view.dart';
 import 'cooldown_meter.dart';
 import 'mode_switch.dart';
@@ -75,21 +77,23 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
           child: Column(
             children: [
               Card(
-                elevation: 0,
-                color: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
                 child: Column(
                   children: [
                     ListTile(
                       dense: true,
                       title: Row(
                         children: [
-                          const Expanded(
+                          const AppAssetIcon(
+                            AppAssets.settingsIcon,
+                            fallbackIcon: Icons.settings,
+                            size: 22,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
                             child: Text(
                               'Matchmaking',
-                              style: TextStyle(fontWeight: FontWeight.w700),
+                              style: Theme.of(context).textTheme.titleLarge
+                                  ?.copyWith(fontWeight: FontWeight.w700),
                             ),
                           ),
                           CompactModeSwitch(
@@ -167,7 +171,11 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                 Expanded(
                                   child: FilledButton.icon(
                                     onPressed: canStart ? _findMatch : null,
-                                    icon: const Icon(Icons.groups_2_outlined),
+                                    icon: const AppAssetIcon(
+                                      AppAssets.newGameIcon,
+                                      fallbackIcon: Icons.groups_2_outlined,
+                                      size: 20,
+                                    ),
                                     label: const Text('Find Match'),
                                   ),
                                 ),
@@ -199,7 +207,11 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                             _selectedCooldownSeconds,
                                       )
                                     : null,
-                                icon: const Icon(Icons.replay, size: 16),
+                                icon: const AppAssetIcon(
+                                  AppAssets.rematchIcon,
+                                  fallbackIcon: Icons.replay,
+                                  size: 18,
+                                ),
                                 label: const Text('Request New Game'),
                               ),
                             ),
@@ -235,7 +247,7 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                 child: Center(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      const barHeight = 34.0;
+                      const barHeight = 58.0;
                       const boardGap = 10.0;
                       final boardSize = math.min(
                         constraints.maxWidth,
@@ -346,8 +358,11 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                             onPressed: canStart
                                                 ? _findMatch
                                                 : null,
-                                            icon: const Icon(
-                                              Icons.groups_2_outlined,
+                                            icon: const AppAssetIcon(
+                                              AppAssets.newGameIcon,
+                                              fallbackIcon:
+                                                  Icons.groups_2_outlined,
+                                              size: 20,
                                             ),
                                             label: const Text('Find Match'),
                                           ),
@@ -415,11 +430,6 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
               ),
               const SizedBox(height: 10),
               Card(
-                elevation: 0,
-                color: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Row(
@@ -589,7 +599,11 @@ class _BackendHealthCard extends StatelessWidget {
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: busy ? null : onCheckPressed,
-                    icon: const Icon(Icons.monitor_heart_outlined, size: 16),
+                    icon: const AppAssetIcon(
+                      AppAssets.feedbackIcon,
+                      fallbackIcon: Icons.monitor_heart_outlined,
+                      size: 16,
+                    ),
                     label: const Text('Check Status'),
                   ),
                 ),
