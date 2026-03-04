@@ -7,6 +7,11 @@ class ChessBoardView extends StatelessWidget {
     required this.pieces,
     required this.playerColor,
     required this.onSquareTap,
+    this.boardAssetPath = AppAssets.chessBoardClassic,
+    this.playableInsetRatio = AppAssets.chessBoardPlayableInsetRatio,
+    this.playableSizeRatio = AppAssets.chessBoardPlayableSizeRatio,
+    this.pieceSprites = AppAssets.pieceSprites,
+    this.pieceTint,
     this.selectedSquare,
     this.legalTargets = const <String>{},
     this.lastMoveFrom,
@@ -22,6 +27,11 @@ class ChessBoardView extends StatelessWidget {
 
   final Map<String, String> pieces;
   final String playerColor;
+  final String boardAssetPath;
+  final double playableInsetRatio;
+  final double playableSizeRatio;
+  final Map<String, String> pieceSprites;
+  final Color? pieceTint;
   final String? selectedSquare;
   final Set<String> legalTargets;
   final String? lastMoveFrom;
@@ -54,17 +64,17 @@ class ChessBoardView extends StatelessWidget {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final playableRect = Rect.fromLTWH(
-              constraints.maxWidth * AppAssets.boardPlayableInsetRatio,
-              constraints.maxHeight * AppAssets.boardPlayableInsetRatio,
-              constraints.maxWidth * AppAssets.boardPlayableSizeRatio,
-              constraints.maxHeight * AppAssets.boardPlayableSizeRatio,
+              constraints.maxWidth * playableInsetRatio,
+              constraints.maxHeight * playableInsetRatio,
+              constraints.maxWidth * playableSizeRatio,
+              constraints.maxHeight * playableSizeRatio,
             );
 
             return Stack(
               children: [
                 Positioned.fill(
                   child: Image.asset(
-                    AppAssets.boardFrame,
+                    boardAssetPath,
                     fit: BoxFit.fill,
                     filterQuality: FilterQuality.high,
                     errorBuilder: (context, error, stackTrace) {
@@ -217,7 +227,7 @@ class ChessBoardView extends StatelessWidget {
   }
 
   Widget _buildPieceSprite(String piece) {
-    final spritePath = AppAssets.pieceSpriteFor(piece);
+    final spritePath = pieceSprites[piece];
     if (spritePath == null) {
       return Center(
         child: Text(
@@ -231,7 +241,7 @@ class ChessBoardView extends StatelessWidget {
       );
     }
 
-    return Image.asset(
+    Widget image = Image.asset(
       spritePath,
       fit: BoxFit.contain,
       filterQuality: FilterQuality.medium,
@@ -250,5 +260,16 @@ class ChessBoardView extends StatelessWidget {
         );
       },
     );
+
+    if (pieceTint != null) {
+      image = ColorFiltered(
+        colorFilter: ColorFilter.mode(
+          pieceTint!.withValues(alpha: 0.28),
+          BlendMode.overlay,
+        ),
+        child: image,
+      );
+    }
+    return image;
   }
 }

@@ -26,7 +26,10 @@ void main() {
 
     expect(find.byType(AppBar), findsNothing);
     expect(find.text('Game Menu'), findsOneWidget);
-    expect(find.textContaining('Moves:'), findsOneWidget);
+    expect(find.textContaining('Status:'), findsOneWidget);
+    expect(find.textContaining('Log:'), findsOneWidget);
+    expect(find.text('Match Chat'), findsOneWidget);
+    expect(find.text('Send'), findsOneWidget);
     expect(find.byKey(const ValueKey('top_bar')), findsOneWidget);
     expect(find.byKey(const ValueKey('bottom_bar')), findsOneWidget);
 
@@ -34,6 +37,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('New Game'), findsOneWidget);
-    expect(find.text('Cooldown (seconds)'), findsOneWidget);
+    expect(find.text('Turn Cooldown (seconds)'), findsOneWidget);
   });
 }

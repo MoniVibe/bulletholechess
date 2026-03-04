@@ -23,12 +23,14 @@ ASSETS_DIR = ROOT / "assets"
 GENERATED_DIR = ASSETS_DIR / "generated"
 PIECES_DIR = GENERATED_DIR / "pieces"
 UI_DIR = GENERATED_DIR / "ui"
+SHESHBESH_DIR = GENERATED_DIR / "sheshbesh"
 
 PIECE_BG_TOLERANCE = 6
 PIECE_ALPHA_BLUR_RADIUS = 0.35
 BOARD_CANVAS_SIZE = 1024
 BOARD_PLAYABLE_INSET = 120
 BOARD_PLAYABLE_SIZE = BOARD_CANVAS_SIZE - (BOARD_PLAYABLE_INSET * 2)
+BACKGAMMON_BOARD_SIZE = 1024
 
 SOURCE_PIECES = {
     "wP.png.png": "wP.png",
@@ -43,6 +45,34 @@ SOURCE_PIECES = {
     "bB.png.png": "bB.png",
     "bQ.png.png": "bQ.png",
     "bKing.png.png": "bK.png",
+}
+
+SOURCE_COINS = {
+    "wCoin.png.png": "white_coin.png",
+    "bCoin.png.png": "black_coin.png",
+    "ChatGPT Image Mar 4, 2026, 08_21_36 PM.png": "red_coin.png",
+}
+
+SOURCE_DICE = {
+    "D1.png.png": "dice_1.png",
+    "D2.png.png": "dice_2.png",
+    "D3.png.png": "dice_3.png",
+    "D4.png.png": "dice_4.png",
+    "D5.png.png": "dice_5.png",
+    "D6.png.png": "dice_6.png",
+}
+
+SOURCE_RED_CHESS_PIECES = {
+    "ChatGPT Image Mar 4, 2026, 08_14_44 PM.png": "rP.png",
+    "ChatGPT Image Mar 4, 2026, 08_16_10 PM.png": "rR.png",
+    "rK.png.png": "rN.png",
+    "rB.png.png": "rB.png",
+    "ChatGPT Image Mar 4, 2026, 08_21_34 PM.png": "rQ.png",
+    "ChatGPT Image Mar 4, 2026, 08_18_12 PM.png": "rK.png",
+}
+
+SOURCE_BACKGAMMON_BOARDS = {
+    "Backgammonboard.png.png": "backgammon_board_classic.png",
 }
 
 
@@ -326,6 +356,97 @@ def _process_piece(source_name: str, output_name: str) -> None:
     print(f"piece: {source_name} -> {output_path.relative_to(ROOT)}")
 
 
+def _process_red_chess_piece(source_name: str, output_name: str) -> None:
+    source_path = ASSETS_DIR / source_name
+    output_path = PIECES_DIR / output_name
+    image = Image.open(source_path)
+    cutout = _remove_edge_connected_background(
+        image,
+        tolerance=16,
+        blur_radius=0.35,
+    )
+    main_shape = _keep_largest_alpha_component(cutout, alpha_floor=10)
+    trimmed = _trim_transparency(main_shape)
+    square_piece = _compose_piece_canvas(trimmed)
+    _save_png(output_path, square_piece)
+    print(f"piece: {source_name} -> {output_path.relative_to(ROOT)}")
+
+
+def _process_coin(source_name: str, output_name: str) -> None:
+    source_path = ASSETS_DIR / source_name
+    output_path = SHESHBESH_DIR / output_name
+    image = Image.open(source_path)
+    cutout = _remove_edge_connected_background(
+        image,
+        tolerance=18,
+        blur_radius=0.35,
+    )
+    main_shape = _keep_largest_alpha_component(cutout, alpha_floor=10)
+    trimmed = _trim_transparency(main_shape)
+    square_piece = _compose_piece_canvas(
+        trimmed,
+        canvas_size=512,
+        fill_ratio=0.82,
+        bottom_padding_ratio=0.02,
+    )
+    _save_png(output_path, square_piece)
+    print(f"coin:  {source_name} -> {output_path.relative_to(ROOT)}")
+
+
+def _process_dice_face(source_name: str, output_name: str) -> None:
+    source_path = ASSETS_DIR / source_name
+    output_path = SHESHBESH_DIR / output_name
+    image = Image.open(source_path)
+    cutout = _remove_edge_connected_background(
+        image,
+        tolerance=18,
+        blur_radius=0.3,
+    )
+    main_shape = _keep_largest_alpha_component(cutout, alpha_floor=8)
+    trimmed = _trim_transparency(main_shape)
+    square = _compose_piece_canvas(
+        trimmed,
+        canvas_size=384,
+        fill_ratio=0.84,
+        bottom_padding_ratio=0.04,
+    )
+    _save_png(output_path, square)
+    print(f"dice:  {source_name} -> {output_path.relative_to(ROOT)}")
+
+
+def _normalize_backgammon_board(image: Image.Image) -> Image.Image:
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    if width == height:
+        return rgba.resize(
+            (BACKGAMMON_BOARD_SIZE, BACKGAMMON_BOARD_SIZE),
+            Image.Resampling.LANCZOS,
+        )
+
+    # Normalize all skin boards to a square gameplay canvas so point overlays
+    # stay aligned regardless of source art aspect ratio.
+    if width > height:
+        offset = (width - height) // 2
+        cropped = rgba.crop((offset, 0, offset + height, height))
+    else:
+        offset = (height - width) // 2
+        cropped = rgba.crop((0, offset, width, offset + width))
+
+    return cropped.resize(
+        (BACKGAMMON_BOARD_SIZE, BACKGAMMON_BOARD_SIZE),
+        Image.Resampling.LANCZOS,
+    )
+
+
+def _process_backgammon_board(source_name: str, output_name: str) -> None:
+    source_path = ASSETS_DIR / source_name
+    output_path = SHESHBESH_DIR / output_name
+    image = Image.open(source_path)
+    normalized = _normalize_backgammon_board(image)
+    _save_png(output_path, normalized)
+    print(f"bgui:  {source_name} -> {output_path.relative_to(ROOT)}")
+
+
 def _process_board_image() -> None:
     source_path = ASSETS_DIR / "boardPearl.png.png"
     output_path = UI_DIR / "board.png"
@@ -364,6 +485,10 @@ def _ensure_sources_exist(paths: Iterable[Path]) -> None:
 
 def main() -> None:
     required_paths = [ASSETS_DIR / name for name in SOURCE_PIECES]
+    required_paths.extend(ASSETS_DIR / name for name in SOURCE_COINS)
+    required_paths.extend(ASSETS_DIR / name for name in SOURCE_DICE)
+    required_paths.extend(ASSETS_DIR / name for name in SOURCE_RED_CHESS_PIECES)
+    required_paths.extend(ASSETS_DIR / name for name in SOURCE_BACKGAMMON_BOARDS)
     required_paths.extend(
         [
             ASSETS_DIR / "boardPearl.png.png",
@@ -376,6 +501,18 @@ def main() -> None:
 
     for source_name, output_name in SOURCE_PIECES.items():
         _process_piece(source_name, output_name)
+
+    for source_name, output_name in SOURCE_RED_CHESS_PIECES.items():
+        _process_red_chess_piece(source_name, output_name)
+
+    for source_name, output_name in SOURCE_COINS.items():
+        _process_coin(source_name, output_name)
+
+    for source_name, output_name in SOURCE_DICE.items():
+        _process_dice_face(source_name, output_name)
+
+    for source_name, output_name in SOURCE_BACKGAMMON_BOARDS.items():
+        _process_backgammon_board(source_name, output_name)
 
     _process_board_image()
     _process_ui_image(

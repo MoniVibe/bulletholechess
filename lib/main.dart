@@ -28,7 +28,7 @@ class BulletholeChessApp extends StatelessWidget {
     );
 
     return MaterialApp(
-      title: 'Bullethole Chess',
+      title: 'Bullethole Sheshbesh',
       debugShowCheckedModeBanner: false,
       theme: baseTheme.copyWith(
         textTheme: baseTheme.textTheme

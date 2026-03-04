@@ -5,10 +5,12 @@ import 'package:flutter/material.dart';
 import '../engine/local_game_controller.dart';
 import 'app_asset_icon.dart';
 import 'app_assets.dart';
-import 'chess_board_view.dart';
 import 'cooldown_meter.dart';
+import 'game_chat_panel.dart';
 import 'mode_switch.dart';
 import 'online_game_panel.dart';
+import 'sheshbesh_board_view.dart';
+import 'skin_catalog.dart';
 
 enum _GameMode { local, online }
 
@@ -23,11 +25,27 @@ class GameScreen extends StatefulWidget {
 
 class _GameScreenState extends State<GameScreen> {
   static const List<int> _cooldownOptionsSeconds = [2, 3, 5, 7, 10];
+  static const double _chatRailWidth = 330;
+  static const double _compactChatHeight = 240;
+  static const Set<String> _ownedBackgammonBoardSkinIds = <String>{
+    'bg_classic',
+    'bg_painted',
+  };
+  static const Set<String> _ownedBackgammonPieceSkinIds = <String>{
+    'bg_ruby',
+    'bg_royal',
+    'bg_minimal',
+  };
 
   late final LocalGameController _controller;
+  late final TextEditingController _chatInputController;
   final math.Random _uiRandom = math.Random();
+  final List<GameChatEntry> _chatEntries = <GameChatEntry>[];
   bool _isGameMenuOpen = false;
   int _selectedCooldownSeconds = 3;
+  String _selectedBoardSkinId = SkinCatalog.defaultBackgammonBoardSkinId;
+  String _selectedWhitePieceSkinId = SkinCatalog.defaultBackgammonPieceSkinId;
+  String _selectedBlackPieceSkinId = SkinCatalog.defaultBackgammonPieceSkinId;
   _GameMode _mode = _GameMode.local;
   bool _didPrecacheVisualAssets = false;
 
@@ -37,10 +55,21 @@ class _GameScreenState extends State<GameScreen> {
     _controller = LocalGameController(
       initialCooldownDuration: Duration(seconds: _selectedCooldownSeconds),
     );
+    _chatInputController = TextEditingController();
+    _chatEntries.add(
+      GameChatEntry(
+        author: 'System',
+        message:
+            'Chat is docked on the board side. Online message transport can plug into this panel.',
+        sentAt: DateTime.now(),
+        isMine: false,
+      ),
+    );
   }
 
   @override
   void dispose() {
+    _chatInputController.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -122,12 +151,23 @@ class _GameScreenState extends State<GameScreen> {
 
   Widget _buildLocalView() {
     final history = _controller.history;
-    final tailHistory = history.length > 8
-        ? history.sublist(history.length - 8)
+    final tailHistory = history.length > 10
+        ? history.sublist(history.length - 10)
         : history;
+    final boardSkin = SkinCatalog.backgammonBoardById(_selectedBoardSkinId);
+    final whitePieceSkin = SkinCatalog.backgammonPieceById(
+      _selectedWhitePieceSkinId,
+    );
+    final blackPieceSkin = SkinCatalog.backgammonPieceById(
+      _selectedBlackPieceSkinId,
+    );
 
-    final whiteRemaining = _controller.cooldownRemaining('w');
-    final blackRemaining = _controller.cooldownRemaining('b');
+    final whiteRemaining = _controller.timerRemaining('w');
+    final blackRemaining = _controller.timerRemaining('b');
+    final diceLabel = _controller.remainingDice.isEmpty
+        ? '-'
+        : _controller.remainingDice.join(' ');
+    final showSideChatRail = MediaQuery.sizeOf(context).width >= 1220;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -184,7 +224,7 @@ class _GameScreenState extends State<GameScreen> {
                         DropdownButtonFormField<int>(
                           initialValue: _selectedCooldownSeconds,
                           decoration: const InputDecoration(
-                            labelText: 'Cooldown (seconds)',
+                            labelText: 'Turn Cooldown (seconds)',
                             border: OutlineInputBorder(),
                             isDense: true,
                           ),
@@ -205,6 +245,114 @@ class _GameScreenState extends State<GameScreen> {
                             });
                           },
                         ),
+                        const SizedBox(height: 8),
+                        DropdownButtonFormField<String>(
+                          initialValue: _selectedBoardSkinId,
+                          decoration: const InputDecoration(
+                            labelText: 'Board Skin',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          items: SkinCatalog.backgammonBoardSkins
+                              .map(
+                                (skin) => DropdownMenuItem<String>(
+                                  value: skin.id,
+                                  enabled: _ownedBackgammonBoardSkinIds
+                                      .contains(skin.id),
+                                  child: Text(
+                                    _ownedBackgammonBoardSkinIds.contains(
+                                          skin.id,
+                                        )
+                                        ? skin.label
+                                        : '${skin.label} (Locked)',
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (value) {
+                            if (value == null) {
+                              return;
+                            }
+                            setState(() {
+                              _selectedBoardSkinId = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        DropdownButtonFormField<String>(
+                          initialValue: _selectedWhitePieceSkinId,
+                          decoration: const InputDecoration(
+                            labelText: 'White Chip Skin',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          items: SkinCatalog.backgammonPieceSkins
+                              .map(
+                                (skin) => DropdownMenuItem<String>(
+                                  value: skin.id,
+                                  enabled: _ownedBackgammonPieceSkinIds
+                                      .contains(skin.id),
+                                  child: Text(
+                                    _ownedBackgammonPieceSkinIds.contains(
+                                          skin.id,
+                                        )
+                                        ? skin.label
+                                        : '${skin.label} (Locked)',
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (value) {
+                            if (value == null) {
+                              return;
+                            }
+                            setState(() {
+                              _selectedWhitePieceSkinId = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        DropdownButtonFormField<String>(
+                          initialValue: _selectedBlackPieceSkinId,
+                          decoration: const InputDecoration(
+                            labelText: 'Black Chip Skin',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          items: SkinCatalog.backgammonPieceSkins
+                              .map(
+                                (skin) => DropdownMenuItem<String>(
+                                  value: skin.id,
+                                  enabled: _ownedBackgammonPieceSkinIds
+                                      .contains(skin.id),
+                                  child: Text(
+                                    _ownedBackgammonPieceSkinIds.contains(
+                                          skin.id,
+                                        )
+                                        ? skin.label
+                                        : '${skin.label} (Locked)',
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (value) {
+                            if (value == null) {
+                              return;
+                            }
+                            setState(() {
+                              _selectedBlackPieceSkinId = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 6),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Locked cosmetics are ready for store unlocks.',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: const Color(0xFF6A635A)),
+                          ),
+                        ),
                         const SizedBox(height: 10),
                         SizedBox(
                           width: double.infinity,
@@ -216,21 +364,6 @@ class _GameScreenState extends State<GameScreen> {
                               size: 20,
                             ),
                             label: const Text('New Game'),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: OutlinedButton.icon(
-                            onPressed: _controller.hasQueuedMove
-                                ? _controller.clearQueuedMove
-                                : null,
-                            icon: const Icon(Icons.clear_all, size: 18),
-                            label: Text(
-                              _controller.hasQueuedMove
-                                  ? 'Clear Queue (${_controller.queuedMoveLabel})'
-                                  : 'Clear Queue',
-                            ),
                           ),
                         ),
                       ],
@@ -247,145 +380,48 @@ class _GameScreenState extends State<GameScreen> {
           ),
           const SizedBox(height: 12),
           Expanded(
-            child: Center(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  const barHeight = 58.0;
-                  const boardGap = 10.0;
-                  final boardSize = math.min(
-                    constraints.maxWidth,
-                    constraints.maxHeight - (barHeight * 2) - (boardGap * 2),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                if (!showSideChatRail) {
+                  return _buildBoardPane(
+                    constraints: constraints,
+                    boardSkin: boardSkin,
+                    whitePieceSkin: whitePieceSkin,
+                    blackPieceSkin: blackPieceSkin,
+                    whiteRemaining: whiteRemaining,
+                    blackRemaining: blackRemaining,
                   );
-                  if (boardSize <= 0) {
-                    return const SizedBox.shrink();
-                  }
+                }
 
-                  final topColor = _controller.playerColor == 'w' ? 'b' : 'w';
-                  final bottomColor = _controller.playerColor;
-                  final whiteIsPlayer = _controller.playerColor == 'w';
-                  final blackIsPlayer = _controller.playerColor == 'b';
-                  final topRemaining = topColor == 'w'
-                      ? whiteRemaining
-                      : blackRemaining;
-                  final bottomRemaining = bottomColor == 'w'
-                      ? whiteRemaining
-                      : blackRemaining;
-                  final topIsPlayer = topColor == 'w'
-                      ? whiteIsPlayer
-                      : blackIsPlayer;
-                  final bottomIsPlayer = bottomColor == 'w'
-                      ? whiteIsPlayer
-                      : blackIsPlayer;
-                  final topActiveColor = topColor == 'w'
-                      ? const Color(0xFF42A5F5)
-                      : const Color(0xFFFF7043);
-                  final bottomActiveColor = bottomColor == 'w'
-                      ? const Color(0xFF42A5F5)
-                      : const Color(0xFFFF7043);
-                  final topFlashTint = topColor == 'w'
-                      ? const Color(0xFFBBDEFB)
-                      : const Color(0xFFFFCCBC);
-                  final bottomFlashTint = bottomColor == 'w'
-                      ? const Color(0xFFBBDEFB)
-                      : const Color(0xFFFFCCBC);
-
-                  return SizedBox(
-                    width: boardSize,
-                    height: boardSize + (barHeight * 2) + (boardGap * 2),
-                    child: Column(
-                      children: [
-                        SizedBox(
-                          height: barHeight,
-                          child: CooldownMeter(
-                            key: const ValueKey('top_bar'),
-                            label: topColor == 'w' ? 'W' : 'B',
-                            remaining: topRemaining,
-                            total: _controller.cooldownDuration,
-                            activeColor: topActiveColor,
-                            isPlayerSide: topIsPlayer,
-                            timeLabel: _controller.hasActiveGame
-                                ? _formatDuration(topRemaining)
-                                : '--',
-                            readyToFlash:
-                                _controller.hasActiveGame &&
-                                topRemaining.inMilliseconds == 0,
-                            flashTint: topFlashTint,
-                            flashDuration: const Duration(milliseconds: 700),
-                          ),
-                        ),
-                        const SizedBox(height: boardGap),
-                        SizedBox(
-                          width: boardSize,
-                          height: boardSize,
-                          child: Stack(
-                            children: [
-                              ChessBoardView(
-                                pieces: _controller.boardPieces,
-                                playerColor: _controller.playerColor,
-                                selectedSquare: _controller.selectedSquare,
-                                legalTargets: _controller.legalTargets,
-                                lastMoveFrom: _controller.playerLastMoveFrom,
-                                lastMoveTo: _controller.playerLastMoveTo,
-                                lastMoveHighlightColor: const Color(0xFFD7CA64),
-                                secondaryMoveFrom:
-                                    _controller.opponentLastMoveFrom,
-                                secondaryMoveTo: _controller.opponentLastMoveTo,
-                                secondaryMoveHighlightColor: const Color(
-                                  0xFFE57373,
-                                ),
-                                queuedMoveFrom: _controller.queuedMoveFrom,
-                                queuedMoveTo: _controller.queuedMoveTo,
-                                onSquareTap: _controller.tapSquare,
-                              ),
-                              if (!_controller.hasActiveGame)
-                                Positioned.fill(
-                                  child: DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      color: Colors.black.withValues(
-                                        alpha: 0.2,
-                                      ),
-                                    ),
-                                    child: Center(
-                                      child: FilledButton.icon(
-                                        onPressed: _showNewGamePrompt,
-                                        icon: const AppAssetIcon(
-                                          AppAssets.newGameIcon,
-                                          fallbackIcon: Icons.play_arrow,
-                                          size: 20,
-                                        ),
-                                        label: const Text('Start New Game'),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: boardGap),
-                        SizedBox(
-                          height: barHeight,
-                          child: CooldownMeter(
-                            key: const ValueKey('bottom_bar'),
-                            label: bottomColor == 'w' ? 'W' : 'B',
-                            remaining: bottomRemaining,
-                            total: _controller.cooldownDuration,
-                            activeColor: bottomActiveColor,
-                            isPlayerSide: bottomIsPlayer,
-                            timeLabel: _controller.hasActiveGame
-                                ? _formatDuration(bottomRemaining)
-                                : '--',
-                            readyToFlash:
-                                _controller.hasActiveGame &&
-                                bottomRemaining.inMilliseconds == 0,
-                            flashTint: bottomFlashTint,
-                            flashDuration: const Duration(milliseconds: 700),
-                          ),
-                        ),
-                      ],
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: LayoutBuilder(
+                        builder: (context, boardConstraints) {
+                          return _buildBoardPane(
+                            constraints: boardConstraints,
+                            boardSkin: boardSkin,
+                            whitePieceSkin: whitePieceSkin,
+                            blackPieceSkin: blackPieceSkin,
+                            whiteRemaining: whiteRemaining,
+                            blackRemaining: blackRemaining,
+                          );
+                        },
+                      ),
                     ),
-                  );
-                },
-              ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: _chatRailWidth,
+                      child: _buildLocalChatPanel(
+                        title: 'Match Chat',
+                        helper:
+                            'Docked beside the board for always-on visibility.',
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
           const SizedBox(height: 12),
@@ -396,7 +432,47 @@ class _GameScreenState extends State<GameScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Moves:',
+                    'Turn:',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _controller.hasActiveGame
+                          ? '${_controller.turnColor == 'w' ? 'White' : 'Black'} | Dice: $diceLabel'
+                          : '-',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Status:',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(_controller.statusText)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Log:',
                     style: TextStyle(fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(width: 8),
@@ -411,6 +487,16 @@ class _GameScreenState extends State<GameScreen> {
               ),
             ),
           ),
+          if (!showSideChatRail) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              height: _compactChatHeight,
+              child: _buildLocalChatPanel(
+                title: 'Match Chat',
+                helper: 'Pinned below game stats on smaller screens.',
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -424,6 +510,303 @@ class _GameScreenState extends State<GameScreen> {
     final halfSteps = (ms / 500).ceil();
     final halfSecondValue = halfSteps / 2;
     return '${halfSecondValue.toStringAsFixed(1)}s';
+  }
+
+  Widget _buildBoardPane({
+    required BoxConstraints constraints,
+    required BoardSkinOption boardSkin,
+    required PieceSkinOption whitePieceSkin,
+    required PieceSkinOption blackPieceSkin,
+    required Duration whiteRemaining,
+    required Duration blackRemaining,
+  }) {
+    const barHeight = 58.0;
+    const boardGap = 10.0;
+    const sideHudGap = 12.0;
+    const minSideHudWidth = 170.0;
+
+    final boardSizeByHeight =
+        constraints.maxHeight - (barHeight * 2) - (boardGap * 2);
+    if (boardSizeByHeight <= 0) {
+      return const SizedBox.shrink();
+    }
+
+    final canShowSideHud =
+        constraints.maxWidth >=
+        (boardSizeByHeight + (minSideHudWidth * 2) + (sideHudGap * 2));
+    final boardSize = math.min(
+      boardSizeByHeight,
+      canShowSideHud ? boardSizeByHeight : constraints.maxWidth,
+    );
+    if (boardSize <= 0) {
+      return const SizedBox.shrink();
+    }
+
+    final topColor = _controller.playerColor == 'w' ? 'b' : 'w';
+    final bottomColor = _controller.playerColor;
+    final whiteIsPlayer = _controller.playerColor == 'w';
+    final blackIsPlayer = _controller.playerColor == 'b';
+    final topRemaining = topColor == 'w' ? whiteRemaining : blackRemaining;
+    final bottomRemaining = bottomColor == 'w'
+        ? whiteRemaining
+        : blackRemaining;
+    final topIsPlayer = topColor == 'w' ? whiteIsPlayer : blackIsPlayer;
+    final bottomIsPlayer = bottomColor == 'w' ? whiteIsPlayer : blackIsPlayer;
+    final topActiveColor = topColor == 'w'
+        ? const Color(0xFF42A5F5)
+        : const Color(0xFFFF7043);
+    final bottomActiveColor = bottomColor == 'w'
+        ? const Color(0xFF42A5F5)
+        : const Color(0xFFFF7043);
+    final topFlashTint = topColor == 'w'
+        ? const Color(0xFFBBDEFB)
+        : const Color(0xFFFFCCBC);
+    final bottomFlashTint = bottomColor == 'w'
+        ? const Color(0xFFBBDEFB)
+        : const Color(0xFFFFCCBC);
+    final sideHudWidth = canShowSideHud
+        ? (constraints.maxWidth - boardSize - (sideHudGap * 2)) / 2
+        : 0.0;
+    final diceForWhite = _controller.turnColor == 'w'
+        ? _controller.remainingDice
+        : const <int>[];
+    final diceForBlack = _controller.turnColor == 'b'
+        ? _controller.remainingDice
+        : const <int>[];
+
+    return Center(
+      child: SizedBox(
+        width: canShowSideHud ? constraints.maxWidth : boardSize,
+        height: boardSize + (barHeight * 2) + (boardGap * 2),
+        child: Column(
+          children: [
+            SizedBox(
+              height: barHeight,
+              child: CooldownMeter(
+                key: const ValueKey('top_bar'),
+                label: topColor == 'w' ? 'W' : 'B',
+                remaining: topRemaining,
+                total: _controller.cooldownDuration,
+                activeColor: topActiveColor,
+                isPlayerSide: topIsPlayer,
+                timeLabel: _controller.hasActiveGame
+                    ? _formatDuration(topRemaining)
+                    : '--',
+                readyToFlash:
+                    _controller.hasActiveGame &&
+                    !_controller.isGameOver &&
+                    _controller.turnColor == topColor &&
+                    topRemaining.inMilliseconds == 0,
+                flashTint: topFlashTint,
+                flashDuration: const Duration(milliseconds: 700),
+              ),
+            ),
+            const SizedBox(height: boardGap),
+            SizedBox(
+              height: boardSize,
+              child: Row(
+                children: [
+                  if (canShowSideHud)
+                    SizedBox(
+                      width: sideHudWidth,
+                      child: _buildTurnSidePanel(
+                        sideColor: 'w',
+                        isActive:
+                            _controller.hasActiveGame &&
+                            _controller.turnColor == 'w',
+                        dice: diceForWhite,
+                      ),
+                    ),
+                  if (canShowSideHud) const SizedBox(width: sideHudGap),
+                  SizedBox(
+                    width: boardSize,
+                    height: boardSize,
+                    child: Stack(
+                      children: [
+                        SheshBeshBoardView(
+                          points: _controller.points,
+                          playerColor: _controller.playerColor,
+                          turnColor: _controller.turnColor,
+                          boardSkin: boardSkin,
+                          whitePieceSkin: whitePieceSkin,
+                          blackPieceSkin: blackPieceSkin,
+                          whiteBar: _controller.barCount('w'),
+                          blackBar: _controller.barCount('b'),
+                          whiteBorneOff: _controller.borneOffCount('w'),
+                          blackBorneOff: _controller.borneOffCount('b'),
+                          selectedPoint: _controller.selectedPoint,
+                          selectedFromBar: _controller.selectedFromBar,
+                          playableSourcePoints:
+                              _controller.turnColor == _controller.playerColor
+                              ? _controller.playableSourcePoints
+                              : const <int>{},
+                          barPlayable:
+                              _controller.turnColor ==
+                                  _controller.playerColor &&
+                              _controller.canEnterFromBar,
+                          sourceDiceUsageHints:
+                              _controller.turnColor == _controller.playerColor
+                              ? _controller.sourceDiceUsageHints
+                              : const <int, int>{},
+                          legalTargetPoints: _controller.legalTargetPoints,
+                          targetDiceSpentHints:
+                              _controller.turnColor == _controller.playerColor
+                              ? _controller.targetDiceSpentHints
+                              : const <int, int>{},
+                          canBearOffTarget: _controller.canBearOffTarget,
+                          playerLastMove: _controller.playerLastMove,
+                          opponentLastMove: _controller.opponentLastMove,
+                          onPointTap: _controller.tapPoint,
+                          onBarTap: _controller.tapBar,
+                          onBearOffTap: _controller.tapBearOff,
+                        ),
+                        if (!_controller.hasActiveGame)
+                          Positioned.fill(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.2),
+                              ),
+                              child: Center(
+                                child: FilledButton.icon(
+                                  onPressed: _showNewGamePrompt,
+                                  icon: const AppAssetIcon(
+                                    AppAssets.newGameIcon,
+                                    fallbackIcon: Icons.play_arrow,
+                                    size: 20,
+                                  ),
+                                  label: const Text('Start New Game'),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  if (canShowSideHud) const SizedBox(width: sideHudGap),
+                  if (canShowSideHud)
+                    SizedBox(
+                      width: sideHudWidth,
+                      child: _buildTurnSidePanel(
+                        sideColor: 'b',
+                        isActive:
+                            _controller.hasActiveGame &&
+                            _controller.turnColor == 'b',
+                        dice: diceForBlack,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: boardGap),
+            SizedBox(
+              height: barHeight,
+              child: CooldownMeter(
+                key: const ValueKey('bottom_bar'),
+                label: bottomColor == 'w' ? 'W' : 'B',
+                remaining: bottomRemaining,
+                total: _controller.cooldownDuration,
+                activeColor: bottomActiveColor,
+                isPlayerSide: bottomIsPlayer,
+                timeLabel: _controller.hasActiveGame
+                    ? _formatDuration(bottomRemaining)
+                    : '--',
+                readyToFlash:
+                    _controller.hasActiveGame &&
+                    !_controller.isGameOver &&
+                    _controller.turnColor == bottomColor &&
+                    bottomRemaining.inMilliseconds == 0,
+                flashTint: bottomFlashTint,
+                flashDuration: const Duration(milliseconds: 700),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTurnSidePanel({
+    required String sideColor,
+    required bool isActive,
+    required List<int> dice,
+  }) {
+    final accent = sideColor == 'w'
+        ? const Color(0xFF9ADFFF)
+        : const Color(0xFFFFC2A0);
+    final label = sideColor == 'w' ? 'White' : 'Black';
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: Colors.black.withValues(alpha: isActive ? 0.32 : 0.14),
+        border: Border.all(
+          color: accent.withValues(alpha: isActive ? 0.95 : 0.34),
+          width: isActive ? 2.2 : 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: isActive ? 0.24 : 0.08),
+            blurRadius: isActive ? 22 : 12,
+            spreadRadius: isActive ? 1.5 : 0.3,
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              isActive ? '$label Turn' : '$label Waiting',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontFamily: 'Orbitron',
+                fontWeight: FontWeight.w800,
+                fontSize: 16,
+                letterSpacing: 0.35,
+                color: Colors.white.withValues(alpha: 0.97),
+                shadows: const <Shadow>[
+                  Shadow(
+                    color: Colors.black87,
+                    blurRadius: 3,
+                    offset: Offset(0, 1),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            if (dice.isNotEmpty)
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
+                children: dice
+                    .map((face) => _SideDiceFace(face: face, size: 56))
+                    .toList(growable: false),
+              )
+            else
+              Text(
+                '...',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.72),
+                  fontWeight: FontWeight.w700,
+                  fontSize: 22,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLocalChatPanel({required String title, required String helper}) {
+    return GameChatPanel(
+      title: title,
+      helperText: helper,
+      entries: _chatEntries,
+      inputController: _chatInputController,
+      onSend: _sendLocalChatMessage,
+    );
   }
 
   Future<void> _showNewGamePrompt() async {
@@ -477,7 +860,44 @@ class _GameScreenState extends State<GameScreen> {
     });
   }
 
+  void _sendLocalChatMessage() {
+    final message = _chatInputController.text.trim();
+    if (message.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _chatEntries.add(
+        GameChatEntry(
+          author: 'You',
+          message: message,
+          sentAt: DateTime.now(),
+          isMine: true,
+        ),
+      );
+      _chatInputController.clear();
+    });
+  }
+
   void _precacheVisualAssets() {
+    final boardAssets = SkinCatalog.backgammonBoardSkins
+        .map((skin) => skin.assetPath)
+        .whereType<String>();
+    final pieceAssets = SkinCatalog.backgammonPieceSkins.expand((skin) sync* {
+      if (skin.whiteAssetPath != null) {
+        yield skin.whiteAssetPath!;
+      }
+      if (skin.blackAssetPath != null) {
+        yield skin.blackAssetPath!;
+      }
+    });
+    final chessBoardAssets = SkinCatalog.chessBoardSkins
+        .map((skin) => skin.assetPath)
+        .whereType<String>();
+    final chessPieceAssets = SkinCatalog.chessPieceSkins.expand(
+      (skin) => skin.spriteMap.values,
+    );
+
     final uniqueAssets = <String>{
       AppAssets.appBackground,
       AppAssets.boardFrame,
@@ -486,10 +906,70 @@ class _GameScreenState extends State<GameScreen> {
       AppAssets.newGameIcon,
       AppAssets.rematchIcon,
       AppAssets.feedbackIcon,
+      AppAssets.whiteCoin,
+      AppAssets.blackCoin,
+      ...AppAssets.diceFaces.values,
       ...AppAssets.pieceSprites.values,
+      ...boardAssets,
+      ...pieceAssets,
+      ...chessBoardAssets,
+      ...chessPieceAssets,
     };
     for (final assetPath in uniqueAssets) {
-      precacheImage(AssetImage(assetPath), context);
+      // Optional/locked cosmetics can be absent in local dev packs.
+      // Ignore preload failures so one missing asset does not break startup.
+      precacheImage(
+        AssetImage(assetPath),
+        context,
+        onError: (Object _, StackTrace? stackTrace) {},
+      );
     }
+  }
+}
+
+class _SideDiceFace extends StatelessWidget {
+  const _SideDiceFace({required this.face, required this.size});
+
+  final int face;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final asset = AppAssets.diceFaceAsset(face);
+    if (asset == null) {
+      return _fallbackFace();
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Image.asset(
+        asset,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.high,
+        errorBuilder: (context, error, stackTrace) => _fallbackFace(),
+      ),
+    );
+  }
+
+  Widget _fallbackFace() {
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        '$face',
+        style: const TextStyle(
+          fontWeight: FontWeight.w800,
+          color: Color(0xFF212121),
+          fontSize: 22,
+        ),
+      ),
+    );
   }
 }

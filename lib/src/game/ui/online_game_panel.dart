@@ -8,6 +8,7 @@ import 'app_assets.dart';
 import 'chess_board_view.dart';
 import 'cooldown_meter.dart';
 import 'mode_switch.dart';
+import 'skin_catalog.dart';
 
 class OnlineGamePanel extends StatefulWidget {
   const OnlineGamePanel({
@@ -29,6 +30,14 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
     'DEFAULT_BACKEND_URL',
     defaultValue: 'http://localhost:8080',
   );
+  static const Set<String> _ownedChessBoardSkinIds = <String>{
+    'chess_pearl',
+    'chess_red',
+  };
+  static const Set<String> _ownedChessPieceSkinIds = <String>{
+    'chess_classic',
+    'chess_neon',
+  };
 
   late final OnlineGameController _controller;
   late final TextEditingController _apiBaseController;
@@ -38,6 +47,8 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
   bool _backendActionInFlight = false;
   bool _isMatchMenuOpen = false;
   int _selectedCooldownSeconds = 3;
+  String _selectedChessBoardSkinId = SkinCatalog.defaultChessBoardSkinId;
+  String _selectedChessPieceSkinId = SkinCatalog.defaultChessPieceSkinId;
 
   @override
   void initState() {
@@ -69,6 +80,12 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
         final tailHistory = history.length > 8
             ? history.sublist(history.length - 8)
             : history;
+        final chessBoardSkin = SkinCatalog.chessBoardById(
+          _selectedChessBoardSkinId,
+        );
+        final chessPieceSkin = SkinCatalog.chessPieceById(
+          _selectedChessPieceSkinId,
+        );
         final whiteRemaining = _controller.cooldownRemaining('w');
         final blackRemaining = _controller.cooldownRemaining('b');
 
@@ -164,6 +181,83 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                         _selectedCooldownSeconds = value;
                                       });
                                     },
+                            ),
+                            const SizedBox(height: 8),
+                            DropdownButtonFormField<String>(
+                              initialValue: _selectedChessBoardSkinId,
+                              decoration: const InputDecoration(
+                                labelText: 'Chess Board Skin',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                              items: SkinCatalog.chessBoardSkins
+                                  .map(
+                                    (skin) => DropdownMenuItem<String>(
+                                      value: skin.id,
+                                      enabled: _ownedChessBoardSkinIds.contains(
+                                        skin.id,
+                                      ),
+                                      child: Text(
+                                        _ownedChessBoardSkinIds.contains(
+                                              skin.id,
+                                            )
+                                            ? skin.label
+                                            : '${skin.label} (Locked)',
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (value) {
+                                if (value == null) {
+                                  return;
+                                }
+                                setState(() {
+                                  _selectedChessBoardSkinId = value;
+                                });
+                              },
+                            ),
+                            const SizedBox(height: 8),
+                            DropdownButtonFormField<String>(
+                              initialValue: _selectedChessPieceSkinId,
+                              decoration: const InputDecoration(
+                                labelText: 'Chess Piece Skin',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                              items: SkinCatalog.chessPieceSkins
+                                  .map(
+                                    (skin) => DropdownMenuItem<String>(
+                                      value: skin.id,
+                                      enabled: _ownedChessPieceSkinIds.contains(
+                                        skin.id,
+                                      ),
+                                      child: Text(
+                                        _ownedChessPieceSkinIds.contains(
+                                              skin.id,
+                                            )
+                                            ? skin.label
+                                            : '${skin.label} (Locked)',
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (value) {
+                                if (value == null) {
+                                  return;
+                                }
+                                setState(() {
+                                  _selectedChessPieceSkinId = value;
+                                });
+                              },
+                            ),
+                            const SizedBox(height: 6),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'Locked chess cosmetics are reserved for store unlocks.',
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: const Color(0xFF6A635A)),
+                              ),
                             ),
                             const SizedBox(height: 8),
                             Row(
@@ -326,6 +420,13 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                   ChessBoardView(
                                     pieces: _controller.boardPieces,
                                     playerColor: _controller.playerColor,
+                                    boardAssetPath: chessBoardSkin.assetPath,
+                                    playableInsetRatio:
+                                        chessBoardSkin.playableInsetRatio,
+                                    playableSizeRatio:
+                                        chessBoardSkin.playableSizeRatio,
+                                    pieceSprites: chessPieceSkin.spriteMap,
+                                    pieceTint: chessPieceSkin.tintColor,
                                     selectedSquare: _controller.selectedSquare,
                                     legalTargets: _controller.legalTargets,
                                     lastMoveFrom:

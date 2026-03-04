@@ -63,10 +63,13 @@ flutter:
   assets:
     - assets/generated/ui/
     - assets/generated/pieces/
+    - assets/generated/sheshbesh/
     - assets/Settings.png
     - assets/Newgame.png
     - assets/rematch.png
     - assets/feedback.png
+    - assets/Boardalt.png.png
+    - assets/Backgammonboard.png.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

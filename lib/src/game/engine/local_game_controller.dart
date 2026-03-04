@@ -1,23 +1,21 @@
 import 'dart:async';
 import 'dart:math';
 
-import 'package:chess/chess.dart' as chess;
 import 'package:flutter/foundation.dart';
 
-import 'chess_rules.dart';
-import 'dumb_ai_engine.dart';
+import 'sheshbesh_ai_engine.dart';
+import 'sheshbesh_model.dart';
+import 'sheshbesh_rules.dart';
 
 class LocalGameController extends ChangeNotifier {
-  static const String _defaultPromotion = ChessRules.defaultPromotion;
-
   LocalGameController({
     Duration initialCooldownDuration = const Duration(seconds: 3),
-    this.aiThinkDelayMin = const Duration(seconds: 2),
-    this.aiThinkDelayMax = const Duration(seconds: 4),
-    DumbAiEngine? aiEngine,
+    this.aiThinkDelayMin = const Duration(milliseconds: 900),
+    this.aiThinkDelayMax = const Duration(milliseconds: 1700),
+    SheshBeshAiEngine? aiEngine,
     Random? random,
   }) : _random = random ?? Random(),
-       _aiEngine = aiEngine ?? DumbAiEngine(random: random ?? Random()),
+       _aiEngine = aiEngine ?? SheshBeshAiEngine(random: random ?? Random()),
        _cooldownDuration = initialCooldownDuration {
     _resetRuntimeState(activateGame: false);
     _ticker = Timer.periodic(
@@ -26,136 +24,138 @@ class LocalGameController extends ChangeNotifier {
     );
   }
 
-  Duration _cooldownDuration;
   final Duration aiThinkDelayMin;
   final Duration aiThinkDelayMax;
   final Random _random;
-  final DumbAiEngine _aiEngine;
+  final SheshBeshAiEngine _aiEngine;
 
-  late chess.Chess _game;
   late Timer _ticker;
-  Timer? _aiMoveTimer;
+  Timer? _aiTurnTimer;
+
+  Duration _cooldownDuration;
   bool _disposed = false;
-  bool _aiMovePending = false;
   bool _hasActiveGame = false;
+  bool _aiTurnPending = false;
 
   String _playerColor = 'w';
-  int _version = 0;
+  String _turnColor = 'w';
+  String? _winnerColor;
+  String? _feedback;
+
+  late SheshBeshPosition _position;
+  List<int> _remainingDice = <int>[];
+  TurnDecision _currentDecision = const TurnDecision(
+    legalMoves: <SheshBeshMove>[],
+    maxMovesUsable: 0,
+    maxUsedPips: 0,
+  );
   DateTime _whiteReadyAt = DateTime.now();
   DateTime _blackReadyAt = DateTime.now();
-  String? _selectedSquare;
-  Set<String> _legalTargets = <String>{};
-  String? _playerLastMoveFrom;
-  String? _playerLastMoveTo;
-  String? _opponentLastMoveFrom;
-  String? _opponentLastMoveTo;
-  String? _feedback;
-  String? _winnerColor;
-  String? _queuedMoveFrom;
-  String? _queuedMoveTo;
-  String _queuedPromotion = _defaultPromotion;
+  DateTime _turnDeadlineAt = DateTime.now();
 
-  int get version => _version;
+  int? _selectedPoint;
+  bool _selectedFromBar = false;
+  Set<int> _legalTargetPoints = <int>{};
+  bool _canBearOffTarget = false;
+  Map<int, int> _targetDiceSpentHints = <int, int>{};
+  Map<int, int> _sourceDiceUsageHints = <int, int>{};
+
+  SheshBeshMove? _playerLastMove;
+  SheshBeshMove? _opponentLastMove;
+
+  final List<String> _history = <String>[];
+
   Duration get cooldownDuration => _cooldownDuration;
   String get playerColor => _playerColor;
-  String get aiColor => ChessRules.oppositeColor(playerColor);
+  String get aiColor => SheshBeshRules.oppositeColor(_playerColor);
+  String get turnColor => _turnColor;
   bool get hasActiveGame => _hasActiveGame;
-
-  String get turnColor => ChessRules.colorCode(_game.turn);
-  String get turnLabel => turnColor == 'w' ? 'White' : 'Black';
-  bool get isGameOver => _winnerColor != null || _game.in_draw;
+  bool get isGameOver => _winnerColor != null;
   String? get winnerColor => _winnerColor;
-  String? get winnerLabel {
-    if (_winnerColor == null) {
-      return null;
-    }
-    return _winnerColor == 'w' ? 'White' : 'Black';
-  }
-
-  bool get aiMovePending => _aiMovePending;
-  bool get canPlayerInteract =>
-      _hasActiveGame &&
-      !isGameOver &&
-      ChessRules.hasAnyLegalMove(_game, playerColor);
-  bool get hasQueuedMove => _queuedMoveFrom != null && _queuedMoveTo != null;
-  String? get queuedMoveLabel {
-    if (!hasQueuedMove) {
-      return null;
-    }
-    return '$_queuedMoveFrom-$_queuedMoveTo';
-  }
-  String? get queuedMoveFrom => _queuedMoveFrom;
-  String? get queuedMoveTo => _queuedMoveTo;
-
-  String? get selectedSquare => _selectedSquare;
-  Set<String> get legalTargets => _legalTargets;
-  String? get playerLastMoveFrom => _playerLastMoveFrom;
-  String? get playerLastMoveTo => _playerLastMoveTo;
-  String? get opponentLastMoveFrom => _opponentLastMoveFrom;
-  String? get opponentLastMoveTo => _opponentLastMoveTo;
-  String? get opponentLastMoveLabel {
-    if (_opponentLastMoveFrom == null || _opponentLastMoveTo == null) {
-      return null;
-    }
-    return '$_opponentLastMoveFrom-$_opponentLastMoveTo';
-  }
+  String? get winnerLabel =>
+      _winnerColor == null ? null : (_winnerColor == 'w' ? 'White' : 'Black');
 
   String? get feedback => _feedback;
-  List<String> get history => _game.getHistory().cast<String>();
-  Map<String, String> get boardPieces => ChessRules.boardPiecesFromFen(_game.fen);
+
+  List<SheshBeshPoint> get points => _position.points;
+  int barCount(String color) => _position.barCount(color);
+  int borneOffCount(String color) => _position.borneOffCount(color);
+  List<int> get remainingDice => List<int>.unmodifiable(_remainingDice);
+  Duration get activeTurnRemaining => _turnRemaining();
+
+  Duration timerRemaining(String color) {
+    if (!_hasActiveGame || isGameOver) {
+      return Duration.zero;
+    }
+    if (color == _turnColor) {
+      return _turnRemaining();
+    }
+    return cooldownRemaining(color);
+  }
+
+  int? get selectedPoint => _selectedPoint;
+  bool get selectedFromBar => _selectedFromBar;
+  Set<int> get legalTargetPoints => _legalTargetPoints;
+  bool get canBearOffTarget => _canBearOffTarget;
+  Map<int, int> get targetDiceSpentHints =>
+      Map<int, int>.unmodifiable(_targetDiceSpentHints);
+  Map<int, int> get sourceDiceUsageHints =>
+      Map<int, int>.unmodifiable(_sourceDiceUsageHints);
+  Set<int> get playableSourcePoints => _derivePlayableSourcePoints();
+  bool get canEnterFromBar => _deriveCanEnterFromBar();
+
+  SheshBeshMove? get playerLastMove => _playerLastMove;
+  SheshBeshMove? get opponentLastMove => _opponentLastMove;
+
+  List<String> get history => List<String>.unmodifiable(_history);
+
+  bool get canPlayerInteract {
+    return _hasActiveGame &&
+        !isGameOver &&
+        _turnColor == _playerColor &&
+        _turnRemaining().inMilliseconds > 0 &&
+        cooldownRemaining(_playerColor).inMilliseconds == 0;
+  }
 
   String get statusText {
     if (!_hasActiveGame) {
-      return 'Start a new game to begin.';
+      return 'Start a new sheshbesh game to begin.';
     }
     if (_winnerColor != null) {
-      return '${winnerLabel!} wins by checkmate. Start a new game.';
-    }
-    if (_game.in_draw) {
-      return 'Draw game.';
+      return '${winnerLabel!} wins. Start a new game.';
     }
 
-    if (ChessRules.isInCheckFor(_game, playerColor)) {
-      return 'Your king is in check. Play a legal response.';
+    final diceText = _remainingDice.join(' ');
+    final turnLabel = _turnColor == 'w' ? 'White' : 'Black';
+    final turnIsPlayer = _turnColor == _playerColor;
+    final cooldown = cooldownRemaining(_turnColor);
+    final turnRemaining = _turnRemaining();
+    if (turnRemaining.inMilliseconds == 0) {
+      return '$turnLabel timed out. Turn will pass.';
     }
 
-    if (hasQueuedMove) {
-      final remaining = cooldownRemaining(playerColor);
-      if (remaining.inMilliseconds > 0) {
-        return 'Queued $queuedMoveLabel (${ChessRules.formatDuration(remaining)}).';
-      }
-      return 'Queued $queuedMoveLabel. Executing...';
+    if (cooldown.inMilliseconds > 0) {
+      return '$turnLabel cooling down (${_formatDuration(cooldown)}).';
     }
 
-    final playerReady = cooldownRemaining(playerColor).inMilliseconds == 0;
-    final botReady = cooldownRemaining(aiColor).inMilliseconds == 0;
-    if (playerReady && botReady) {
-      if (ChessRules.isInCheckFor(_game, playerColor)) {
-        return 'Both ready. You are in check, move now.';
-      }
-      if (_aiMovePending) {
-        return 'Both ready. Bot is thinking, but you can move now.';
-      }
-      return 'Both ready. Move anytime.';
+    if (!_currentDecision.hasMoves) {
+      return '$turnLabel has no legal moves and will pass.';
     }
 
-    if (playerReady) {
-      return ChessRules.isInCheckFor(_game, playerColor)
-          ? 'You are in check. Move now.'
-          : 'You can move now.';
+    if (turnIsPlayer) {
+      return 'Your turn (${_formatDuration(turnRemaining)}). Dice: $diceText';
     }
 
-    final aiRemaining = cooldownRemaining(aiColor);
-    if (aiRemaining.inMilliseconds == 0) {
-      return _aiMovePending ? 'Bot is thinking...' : 'Bot can move now.';
+    if (_aiTurnPending) {
+      return 'Bot is thinking. Dice: $diceText';
     }
-    return 'Cooling down...';
+
+    return 'Bot turn (${_formatDuration(turnRemaining)}). Dice: $diceText';
   }
 
   Duration cooldownRemaining(String color) {
-    final now = DateTime.now();
     final readyAt = color == 'w' ? _whiteReadyAt : _blackReadyAt;
-    final remaining = readyAt.difference(now);
+    final remaining = readyAt.difference(DateTime.now());
     if (remaining.isNegative) {
       return Duration.zero;
     }
@@ -168,115 +168,91 @@ class LocalGameController extends ChangeNotifier {
     if (cooldownDuration != null) {
       _cooldownDuration = cooldownDuration;
     }
+
     _resetRuntimeState(activateGame: true);
-    _maybeScheduleAiMove();
+
+    final opening = SheshBeshRules.determineOpeningStarter(_random);
+    _history.add(
+      'Opening roll W${opening.whiteRoll} / B${opening.blackRoll}. '
+      '${opening.startingColor == 'w' ? 'White' : 'Black'} starts.',
+    );
+
+    _beginTurn(opening.startingColor);
+    _refreshDecision();
+    _maybeScheduleAiTurn();
     notifyListeners();
   }
 
-  void clearQueuedMove() {
-    if (!hasQueuedMove) {
-      return;
-    }
-    _clearQueuedMove();
-    _feedback = 'Queued move cleared';
-    notifyListeners();
-  }
-
-  void tapSquare(String square) {
+  void tapPoint(int pointIndex) {
     if (!canPlayerInteract || isGameOver) {
       return;
     }
+    if (pointIndex < 0 || pointIndex >= 24) {
+      return;
+    }
 
-    final pieces = boardPieces;
-    final piece = pieces[square];
-    final isOwnPiece = piece != null && ChessRules.pieceColor(piece) == playerColor;
-
-    if (_selectedSquare == null) {
-      if (isOwnPiece) {
-        _selectedSquare = square;
-        _legalTargets = ChessRules.legalDestinationsFrom(
-          game: _game,
-          square: square,
-          color: playerColor,
-        );
-        _feedback = null;
+    if (_position.barCount(_turnColor) > 0) {
+      _selectedFromBar = true;
+      _selectedPoint = null;
+      _updateSelectionTargets();
+      final moved = _attemptSelectedMove(toPoint: pointIndex);
+      if (!moved) {
+        _feedback = 'Enter from bar first.';
         notifyListeners();
       }
       return;
     }
 
-    if (_selectedSquare == square) {
+    final isOwnPoint = _pointOwnedBy(pointIndex, _turnColor);
+
+    if (_selectedPoint != null) {
+      final moved = _attemptSelectedMove(toPoint: pointIndex);
+      if (moved) {
+        return;
+      }
+    }
+
+    if (!isOwnPoint) {
+      _feedback = 'Select one of your checkers.';
+      notifyListeners();
+      return;
+    }
+
+    if (_selectedPoint == pointIndex) {
       _clearSelection();
       notifyListeners();
       return;
     }
 
-    final from = _selectedSquare!;
-    final legalMove = ChessRules.findValidatedLegalMove(
-      game: _game,
-      from: from,
-      to: square,
-      color: playerColor,
-      promotion: _defaultPromotion,
-    );
-    final legalNow = legalMove != null;
+    _selectedFromBar = false;
+    _selectedPoint = pointIndex;
+    _feedback = null;
+    _updateSelectionTargets();
+    notifyListeners();
+  }
 
-    if (legalNow) {
-      final onCooldown = cooldownRemaining(playerColor).inMilliseconds > 0;
-      if (onCooldown) {
-        _queuePlayerMove(
-          from: from,
-          to: square,
-          promotion: _defaultPromotion,
-        );
-        _clearSelection();
-        _feedback = null;
-        notifyListeners();
-        return;
-      }
-
-      final didMove = _applyMove(
-        from: from,
-        to: square,
-        moverColor: playerColor,
-      );
-      if (didMove) {
-        _clearQueuedMove();
-        _clearSelection();
-        _feedback = null;
-        _maybeScheduleAiMove();
-        notifyListeners();
-        return;
-      }
-    }
-
-    if (isOwnPiece) {
-      final onCooldown = cooldownRemaining(playerColor).inMilliseconds > 0;
-      if (onCooldown && _selectedSquare != square) {
-        // Allow speculative queueing (e.g. predicted recapture) while cooling down.
-        _queuePlayerMove(
-          from: from,
-          to: square,
-          promotion: _defaultPromotion,
-        );
-        _clearSelection();
-        _feedback = null;
-        notifyListeners();
-        return;
-      }
-      _selectedSquare = square;
-      _legalTargets = ChessRules.legalDestinationsFrom(
-        game: _game,
-        square: square,
-        color: playerColor,
-      );
-      _feedback = null;
-      notifyListeners();
+  void tapBar() {
+    if (!canPlayerInteract || isGameOver) {
       return;
     }
-
-    _feedback = 'Illegal move';
+    if (_position.barCount(_turnColor) == 0) {
+      return;
+    }
+    _selectedFromBar = true;
+    _selectedPoint = null;
+    _feedback = null;
+    _updateSelectionTargets();
     notifyListeners();
+  }
+
+  void tapBearOff() {
+    if (!canPlayerInteract || isGameOver) {
+      return;
+    }
+    if (!_canBearOffTarget) {
+      return;
+    }
+    _attemptSelectedMove(bearOff: true);
   }
 
   @override
@@ -288,245 +264,502 @@ class LocalGameController extends ChangeNotifier {
   }
 
   void _onTick() {
-    if (_disposed) {
+    if (_disposed || !_hasActiveGame || isGameOver) {
       return;
     }
-    if (!_hasActiveGame) {
+
+    if (_maybeExpireTurnOnTimeout()) {
       return;
     }
-    _refreshTerminalState();
-    _tryExecuteQueuedPlayerMove();
-    _maybeScheduleAiMove();
+
+    _refreshDecision();
+    if (_maybeAutoPassStuckTurn()) {
+      return;
+    }
+    _maybeScheduleAiTurn();
     notifyListeners();
   }
 
-  void _maybeScheduleAiMove() {
-    if (!_hasActiveGame ||
-        _aiMovePending ||
-        isGameOver ||
-        cooldownRemaining(aiColor).inMilliseconds > 0 ||
-        !ChessRules.hasAnyLegalMove(_game, aiColor)) {
-      return;
+  bool _attemptSelectedMove({int? toPoint, bool bearOff = false}) {
+    final source = _selectedSourceKind();
+    if (source == _SelectedSource.none) {
+      return false;
     }
 
-    _aiMovePending = true;
-    _aiMoveTimer = Timer(_nextAiThinkDelay(), _runAiMove);
+    final matching = _currentDecision.legalMoves
+        .where((move) {
+          if (source == _SelectedSource.bar &&
+              move.source != SheshBeshMoveSource.bar) {
+            return false;
+          }
+          if (source == _SelectedSource.point) {
+            if (move.source != SheshBeshMoveSource.point ||
+                move.fromPoint != _selectedPoint) {
+              return false;
+            }
+          }
+          if (bearOff) {
+            return move.bearsOff;
+          }
+          return !move.bearsOff && move.toPoint == toPoint;
+        })
+        .toList(growable: false);
+
+    if (matching.isEmpty) {
+      return false;
+    }
+
+    // If several dice map to the same destination, prefer the larger die.
+    matching.sort((a, b) => b.die.compareTo(a.die));
+    _applyMove(matching.first, moverColor: _turnColor, actorIsPlayer: true);
+    return true;
   }
 
-  void _runAiMove() {
-    if (_disposed) {
-      return;
+  void _applyMove(
+    SheshBeshMove move, {
+    required String moverColor,
+    required bool actorIsPlayer,
+  }) {
+    _position = SheshBeshRules.applyMove(
+      position: _position,
+      color: moverColor,
+      move: move,
+    );
+
+    _remainingDice.remove(move.die);
+
+    if (actorIsPlayer) {
+      _playerLastMove = move;
+    } else {
+      _opponentLastMove = move;
     }
 
-    if (!_hasActiveGame ||
-        isGameOver ||
-        cooldownRemaining(aiColor).inMilliseconds > 0 ||
-        !ChessRules.hasAnyLegalMove(_game, aiColor)) {
-      _aiMovePending = false;
+    _history.add(move.describe(moverColor));
+    _feedback = null;
+    _clearSelection();
+
+    _winnerColor = SheshBeshRules.winnerColor(_position);
+    if (_winnerColor != null) {
+      _aiTurnPending = false;
+      _cancelAiTimer();
       notifyListeners();
       return;
     }
 
-    final move = ChessRules.withTurn(_game, aiColor, () => _aiEngine.chooseMove(_game));
-    if (move != null) {
-      _applyMove(
-        from: move.from,
-        to: move.to,
-        promotion: move.promotion,
-        moverColor: aiColor,
-      );
+    _refreshDecision();
+
+    if (_remainingDice.isEmpty || !_currentDecision.hasMoves) {
+      if (_remainingDice.isNotEmpty && !_currentDecision.hasMoves) {
+        _history.add(
+          '${moverColor == 'w' ? 'W' : 'B'} no legal moves with '
+          'remaining dice ${_remainingDice.join(', ')}.',
+        );
+      }
+      _endCurrentTurn();
+      return;
     }
 
-    _refreshSelectionForCurrentBoard();
-    _aiMovePending = false;
-    _feedback = null;
     notifyListeners();
   }
 
-  void _resetRuntimeState({required bool activateGame}) {
-    _game = chess.Chess();
-    _hasActiveGame = activateGame;
-    _version = 0;
-    _selectedSquare = null;
-    _legalTargets = <String>{};
-    _playerLastMoveFrom = null;
-    _playerLastMoveTo = null;
-    _opponentLastMoveFrom = null;
-    _opponentLastMoveTo = null;
-    _feedback = null;
-    _aiMovePending = false;
-    _queuedMoveFrom = null;
-    _queuedMoveTo = null;
-    _queuedPromotion = _defaultPromotion;
-    _winnerColor = null;
-
-    final now = DateTime.now();
-    _whiteReadyAt = now;
-    _blackReadyAt = now;
-    _refreshTerminalState();
+  void _endCurrentTurn({bool applyMoverCooldown = true}) {
+    final mover = _turnColor;
+    if (applyMoverCooldown) {
+      _setCooldownForMover(mover);
+    }
+    _beginTurn(SheshBeshRules.oppositeColor(mover));
+    _refreshDecision();
+    _maybeScheduleAiTurn();
+    notifyListeners();
   }
 
-  bool _applyMove({
-    required String from,
-    required String to,
-    required String moverColor,
-    String promotion = _defaultPromotion,
-  }) {
+  void _beginTurn(String color) {
+    _turnColor = color;
+    _turnDeadlineAt = DateTime.now().add(_cooldownDuration);
+    _remainingDice = SheshBeshRules.rollTurnDice(_random);
+    _clearSelection();
+    _history.add(
+      '${color == 'w' ? 'W' : 'B'} rolls ${_remainingDice.join(' + ')}',
+    );
+  }
+
+  bool _maybeAutoPassStuckTurn() {
     if (!_hasActiveGame ||
         isGameOver ||
-        cooldownRemaining(moverColor).inMilliseconds > 0) {
+        _turnRemaining().inMilliseconds == 0 ||
+        cooldownRemaining(_turnColor).inMilliseconds > 0) {
+      return false;
+    }
+    if (_currentDecision.hasMoves) {
       return false;
     }
 
-    final legalMove = ChessRules.findValidatedLegalMove(
-      game: _game,
-      from: from,
-      to: to,
-      color: moverColor,
-      promotion: promotion,
-    );
-    if (legalMove == null) {
-      return false;
-    }
-
-    final previousTurn = _game.turn;
-    _game.turn = ChessRules.toChessColor(moverColor);
-    final moved = _game.move({'from': from, 'to': to, 'promotion': promotion});
-
-    if (!moved) {
-      _game.turn = previousTurn;
-      return false;
-    }
-
-    if (_aiMovePending && moverColor == playerColor) {
-      _cancelAiTimer();
-      _aiMovePending = false;
-    }
-
-    _version += 1;
-    if (moverColor == playerColor) {
-      _playerLastMoveFrom = from;
-      _playerLastMoveTo = to;
-    } else {
-      _opponentLastMoveFrom = from;
-      _opponentLastMoveTo = to;
-    }
-    _setCooldownForMover(moverColor);
-    _refreshSelectionForCurrentBoard();
-    _refreshTerminalState();
+    _history.add('${_turnColor == 'w' ? 'W' : 'B'} passes (no legal moves).');
+    _endCurrentTurn();
     return true;
   }
 
-  void _setCooldownForMover(String mover) {
-    final now = DateTime.now();
-    if (mover == 'w') {
-      _whiteReadyAt = now.add(_cooldownDuration);
-      _blackReadyAt = now;
+  void _maybeScheduleAiTurn() {
+    if (!_hasActiveGame ||
+        isGameOver ||
+        _turnColor != aiColor ||
+        _turnRemaining().inMilliseconds == 0 ||
+        cooldownRemaining(aiColor).inMilliseconds > 0 ||
+        !_currentDecision.hasMoves ||
+        _aiTurnPending) {
       return;
     }
 
-    _blackReadyAt = now.add(_cooldownDuration);
-    _whiteReadyAt = now;
+    _aiTurnPending = true;
+    _aiTurnTimer = Timer(_nextAiThinkDelay(), _runAiTurn);
+  }
+
+  void _runAiTurn() {
+    if (_disposed) {
+      return;
+    }
+
+    if (!_hasActiveGame ||
+        isGameOver ||
+        _turnColor != aiColor ||
+        _turnRemaining().inMilliseconds == 0 ||
+        cooldownRemaining(aiColor).inMilliseconds > 0) {
+      _aiTurnPending = false;
+      notifyListeners();
+      return;
+    }
+
+    _refreshDecision();
+    if (!_currentDecision.hasMoves) {
+      _aiTurnPending = false;
+      _maybeAutoPassStuckTurn();
+      notifyListeners();
+      return;
+    }
+
+    while (!isGameOver && _turnColor == aiColor && _remainingDice.isNotEmpty) {
+      if (_turnRemaining().inMilliseconds == 0) {
+        _aiTurnPending = false;
+        _maybeExpireTurnOnTimeout();
+        return;
+      }
+      final move = _aiEngine.chooseMove(
+        position: _position,
+        color: aiColor,
+        dice: _remainingDice,
+      );
+      if (move == null) {
+        break;
+      }
+
+      _applyMove(move, moverColor: aiColor, actorIsPlayer: false);
+
+      if (_turnColor != aiColor || isGameOver) {
+        break;
+      }
+    }
+
+    _aiTurnPending = false;
+    notifyListeners();
+  }
+
+  void _refreshDecision() {
+    if (!_hasActiveGame || isGameOver) {
+      _currentDecision = const TurnDecision(
+        legalMoves: <SheshBeshMove>[],
+        maxMovesUsable: 0,
+        maxUsedPips: 0,
+      );
+      _updateSelectionTargets();
+      return;
+    }
+
+    _currentDecision = SheshBeshRules.computeTurnDecision(
+      position: _position,
+      color: _turnColor,
+      dice: _remainingDice,
+    );
+
+    if (!_currentDecision.hasMoves) {
+      _clearSelection();
+      _sourceDiceUsageHints = <int, int>{};
+      return;
+    }
+
+    if (_position.barCount(_turnColor) > 0) {
+      _selectedFromBar = true;
+      _selectedPoint = null;
+      _updateSelectionTargets();
+      return;
+    }
+
+    // Keep the selection only if it still has legal targets.
+    if (_selectedPoint != null) {
+      final selectedStillValid = _currentDecision.legalMoves.any(
+        (move) =>
+            move.source == SheshBeshMoveSource.point &&
+            move.fromPoint == _selectedPoint,
+      );
+      if (!selectedStillValid) {
+        _selectedPoint = null;
+      }
+    }
+
+    _updateSelectionTargets();
+  }
+
+  void _updateSelectionTargets() {
+    final targets = <int>{};
+    var canBearOff = false;
+
+    final source = _selectedSourceKind();
+    if (source == _SelectedSource.none) {
+      _legalTargetPoints = const <int>{};
+      _canBearOffTarget = false;
+      _rebuildDiceUsageHints(source: source);
+      return;
+    }
+
+    for (final move in _currentDecision.legalMoves) {
+      final matchesSource = switch (source) {
+        _SelectedSource.bar => move.source == SheshBeshMoveSource.bar,
+        _SelectedSource.point =>
+          move.source == SheshBeshMoveSource.point &&
+              move.fromPoint == _selectedPoint,
+        _SelectedSource.none => false,
+      };
+      if (!matchesSource) {
+        continue;
+      }
+      if (move.bearsOff) {
+        canBearOff = true;
+        continue;
+      }
+      if (move.toPoint != null) {
+        targets.add(move.toPoint!);
+      }
+    }
+
+    _legalTargetPoints = targets;
+    _canBearOffTarget = canBearOff;
+    _rebuildDiceUsageHints(source: source);
+  }
+
+  _SelectedSource _selectedSourceKind() {
+    if (_selectedFromBar) {
+      return _SelectedSource.bar;
+    }
+    if (_selectedPoint != null) {
+      return _SelectedSource.point;
+    }
+    return _SelectedSource.none;
+  }
+
+  bool _pointOwnedBy(int point, String color) {
+    final stack = _position.points[point];
+    return stack.color == color && stack.count > 0;
+  }
+
+  Set<int> _derivePlayableSourcePoints() {
+    if (!_hasActiveGame ||
+        isGameOver ||
+        _turnRemaining().inMilliseconds == 0 ||
+        cooldownRemaining(_turnColor).inMilliseconds > 0) {
+      return const <int>{};
+    }
+    return _currentDecision.legalMoves
+        .where((move) => move.source == SheshBeshMoveSource.point)
+        .map((move) => move.fromPoint!)
+        .toSet();
+  }
+
+  bool _deriveCanEnterFromBar() {
+    if (!_hasActiveGame ||
+        isGameOver ||
+        _turnRemaining().inMilliseconds == 0 ||
+        cooldownRemaining(_turnColor).inMilliseconds > 0) {
+      return false;
+    }
+    return _currentDecision.legalMoves.any(
+      (move) => move.source == SheshBeshMoveSource.bar,
+    );
+  }
+
+  bool _maybeExpireTurnOnTimeout() {
+    if (!_hasActiveGame || isGameOver || _turnRemaining().inMilliseconds > 0) {
+      return false;
+    }
+
+    final expiredColor = _turnColor;
+    _history.add(
+      '${expiredColor == 'w' ? 'W' : 'B'} time expired. Turn passed.',
+    );
+    _cancelAiTimer();
+    _endCurrentTurn(applyMoverCooldown: false);
+    return true;
+  }
+
+  Duration _turnRemaining() {
+    final remaining = _turnDeadlineAt.difference(DateTime.now());
+    if (remaining.isNegative) {
+      return Duration.zero;
+    }
+    return remaining;
+  }
+
+  void _rebuildDiceUsageHints({required _SelectedSource source}) {
+    _sourceDiceUsageHints = <int, int>{};
+    _targetDiceSpentHints = <int, int>{};
+
+    if (!_hasActiveGame ||
+        isGameOver ||
+        !_currentDecision.hasMoves ||
+        _turnRemaining().inMilliseconds == 0 ||
+        cooldownRemaining(_turnColor).inMilliseconds > 0) {
+      return;
+    }
+
+    final pointMoves = _currentDecision.legalMoves
+        .where(
+          (move) =>
+              move.source == SheshBeshMoveSource.point &&
+              move.fromPoint != null,
+        )
+        .toList(growable: false);
+    for (final move in pointMoves) {
+      final sourcePoint = move.fromPoint!;
+      final maxDiceSpent = _maxDiceSpentFollowingMove(move);
+      final prior = _sourceDiceUsageHints[sourcePoint] ?? 0;
+      if (maxDiceSpent > prior) {
+        _sourceDiceUsageHints[sourcePoint] = maxDiceSpent;
+      }
+
+      if (source == _SelectedSource.point &&
+          _selectedPoint == sourcePoint &&
+          !move.bearsOff &&
+          move.toPoint != null) {
+        final targetPoint = move.toPoint!;
+        final targetPrior = _targetDiceSpentHints[targetPoint] ?? 0;
+        if (maxDiceSpent > targetPrior) {
+          _targetDiceSpentHints[targetPoint] = maxDiceSpent;
+        }
+      }
+    }
+
+    if (source == _SelectedSource.bar) {
+      final barMoves = _currentDecision.legalMoves
+          .where(
+            (move) =>
+                move.source == SheshBeshMoveSource.bar &&
+                !move.bearsOff &&
+                move.toPoint != null,
+          )
+          .toList(growable: false);
+      for (final move in barMoves) {
+        final targetPoint = move.toPoint!;
+        final maxDiceSpent = _maxDiceSpentFollowingMove(move);
+        final prior = _targetDiceSpentHints[targetPoint] ?? 0;
+        if (maxDiceSpent > prior) {
+          _targetDiceSpentHints[targetPoint] = maxDiceSpent;
+        }
+      }
+    }
+  }
+
+  int _maxDiceSpentFollowingMove(SheshBeshMove firstMove) {
+    final nextPosition = SheshBeshRules.applyMove(
+      position: _position,
+      color: _turnColor,
+      move: firstMove,
+    );
+    final nextDice = _consumeDie(_remainingDice, firstMove.die);
+    final additional = firstMove.bearsOff || firstMove.toPoint == null
+        ? 0
+        : _maxAdditionalDiceForChecker(
+            position: nextPosition,
+            checkerPoint: firstMove.toPoint!,
+            dice: nextDice,
+          );
+    return 1 + additional;
+  }
+
+  int _maxAdditionalDiceForChecker({
+    required SheshBeshPosition position,
+    required int checkerPoint,
+    required List<int> dice,
+  }) {
+    if (dice.isEmpty) {
+      return 0;
+    }
+
+    final decision = SheshBeshRules.computeTurnDecision(
+      position: position,
+      color: _turnColor,
+      dice: dice,
+    );
+    if (!decision.hasMoves) {
+      return 0;
+    }
+
+    var best = 0;
+    // Follow the same checker across the turn so the hint reflects
+    // "how many dice this single piece can still spend".
+    for (final move in decision.legalMoves) {
+      if (move.source != SheshBeshMoveSource.point ||
+          move.fromPoint != checkerPoint) {
+        continue;
+      }
+      final nextPosition = SheshBeshRules.applyMove(
+        position: position,
+        color: _turnColor,
+        move: move,
+      );
+      final nextDice = _consumeDie(dice, move.die);
+      final tail = move.bearsOff || move.toPoint == null
+          ? 0
+          : _maxAdditionalDiceForChecker(
+              position: nextPosition,
+              checkerPoint: move.toPoint!,
+              dice: nextDice,
+            );
+      final spent = 1 + tail;
+      if (spent > best) {
+        best = spent;
+      }
+    }
+    return best;
+  }
+
+  List<int> _consumeDie(List<int> dice, int die) {
+    final nextDice = List<int>.from(dice);
+    final index = nextDice.indexOf(die);
+    if (index >= 0) {
+      nextDice.removeAt(index);
+    }
+    return nextDice;
+  }
+
+  void _setCooldownForMover(String moverColor) {
+    final readyAt = DateTime.now().add(_cooldownDuration);
+    if (moverColor == 'w') {
+      _whiteReadyAt = readyAt;
+      return;
+    }
+    _blackReadyAt = readyAt;
   }
 
   void _clearSelection() {
-    _selectedSquare = null;
-    _legalTargets = <String>{};
-  }
-
-  void _queuePlayerMove({
-    required String from,
-    required String to,
-    required String promotion,
-  }) {
-    _queuedMoveFrom = from;
-    _queuedMoveTo = to;
-    _queuedPromotion = promotion;
-  }
-
-  void _clearQueuedMove() {
-    _queuedMoveFrom = null;
-    _queuedMoveTo = null;
-    _queuedPromotion = _defaultPromotion;
-  }
-
-  void _tryExecuteQueuedPlayerMove() {
-    if (!_hasActiveGame || !hasQueuedMove || isGameOver) {
-      return;
-    }
-    if (cooldownRemaining(playerColor).inMilliseconds > 0) {
-      return;
-    }
-
-    final from = _queuedMoveFrom!;
-    final to = _queuedMoveTo!;
-    final promotion = _queuedPromotion;
-    final legalMove = ChessRules.findValidatedLegalMove(
-      game: _game,
-      from: from,
-      to: to,
-      color: playerColor,
-      promotion: promotion,
-    );
-    if (legalMove == null) {
-      _clearQueuedMove();
-      _feedback = null;
-      return;
-    }
-
-    final moved = _applyMove(
-      from: from,
-      to: to,
-      promotion: promotion,
-      moverColor: playerColor,
-    );
-    if (!moved) {
-      _clearQueuedMove();
-      _feedback = null;
-      return;
-    }
-
-    _clearQueuedMove();
-    _feedback = null;
-    _maybeScheduleAiMove();
-  }
-
-  void _refreshSelectionForCurrentBoard() {
-    if (_selectedSquare == null) {
-      return;
-    }
-
-    final piece = boardPieces[_selectedSquare!];
-    if (piece == null || ChessRules.pieceColor(piece) != playerColor) {
-      _clearSelection();
-      return;
-    }
-
-    _legalTargets = ChessRules.legalDestinationsFrom(
-      game: _game,
-      square: _selectedSquare!,
-      color: playerColor,
-    );
-  }
-
-  void _refreshTerminalState() {
-    if (!_hasActiveGame) {
-      _winnerColor = null;
-      return;
-    }
-    final winner = ChessRules.detectCheckmateWinner(_game);
-    _winnerColor = winner;
-    if (_winnerColor != null) {
-      _cancelAiTimer();
-      _aiMovePending = false;
-      _clearQueuedMove();
-      _clearSelection();
-    }
+    _selectedPoint = null;
+    _selectedFromBar = false;
+    _legalTargetPoints = <int>{};
+    _canBearOffTarget = false;
+    _targetDiceSpentHints = <int, int>{};
   }
 
   void _cancelAiTimer() {
-    _aiMoveTimer?.cancel();
-    _aiMoveTimer = null;
+    _aiTurnTimer?.cancel();
+    _aiTurnTimer = null;
+    _aiTurnPending = false;
   }
 
   Duration _nextAiThinkDelay() {
@@ -539,4 +772,38 @@ class LocalGameController extends ChangeNotifier {
     return Duration(milliseconds: minMs + delta);
   }
 
+  void _resetRuntimeState({required bool activateGame}) {
+    _position = SheshBeshRules.initialPosition();
+    _hasActiveGame = activateGame;
+    _turnColor = 'w';
+    _winnerColor = null;
+    _feedback = null;
+    _remainingDice = <int>[];
+    _currentDecision = const TurnDecision(
+      legalMoves: <SheshBeshMove>[],
+      maxMovesUsable: 0,
+      maxUsedPips: 0,
+    );
+    _clearSelection();
+    _playerLastMove = null;
+    _opponentLastMove = null;
+    _history.clear();
+    final now = DateTime.now();
+    _whiteReadyAt = now;
+    _blackReadyAt = now;
+    _turnDeadlineAt = now;
+    _sourceDiceUsageHints = <int, int>{};
+    _targetDiceSpentHints = <int, int>{};
+  }
+
+  static String _formatDuration(Duration duration) {
+    final ms = duration.inMilliseconds;
+    if (ms <= 0) {
+      return '0.0s';
+    }
+    final halfSteps = (ms / 500).ceil();
+    return '${(halfSteps / 2).toStringAsFixed(1)}s';
+  }
 }
+
+enum _SelectedSource { none, point, bar }
