@@ -23,14 +23,12 @@ ASSETS_DIR = ROOT / "assets"
 GENERATED_DIR = ASSETS_DIR / "generated"
 PIECES_DIR = GENERATED_DIR / "pieces"
 UI_DIR = GENERATED_DIR / "ui"
-SHESHBESH_DIR = GENERATED_DIR / "sheshbesh"
 
 PIECE_BG_TOLERANCE = 6
 PIECE_ALPHA_BLUR_RADIUS = 0.35
 BOARD_CANVAS_SIZE = 1024
 BOARD_PLAYABLE_INSET = 120
 BOARD_PLAYABLE_SIZE = BOARD_CANVAS_SIZE - (BOARD_PLAYABLE_INSET * 2)
-BACKGAMMON_BOARD_SIZE = 1024
 
 SOURCE_PIECES = {
     "wP.png": ("wP.png-removebg-preview.png", "wP.png.png"),
@@ -45,25 +43,6 @@ SOURCE_PIECES = {
     "bB.png": ("bB.png-removebg-preview.png", "bB.png.png"),
     "bQ.png": ("bQ.png-removebg-preview.png", "bQ.png.png"),
     "bK.png": ("bKing.png-removebg-preview.png", "bKing.png.png"),
-}
-
-SOURCE_COINS = {
-    "white_coin.png": ("wCoin.png-removebg-preview.png", "wCoin.png.png"),
-    "black_coin.png": ("bCoin.png-removebg-preview.png", "bCoin.png.png"),
-    "red_coin.png": (
-        "rCoin.png-removebg-preview.png",
-        "rCoin.png.png",
-        "ChatGPT Image Mar 4, 2026, 08_21_36 PM.png",
-    ),
-}
-
-SOURCE_DICE = {
-    "dice_1.png": ("D1.png-removebg-preview.png", "D1.png.png"),
-    "dice_2.png": ("D2.png-removebg-preview.png", "D2.png.png"),
-    "dice_3.png": ("D3.png-removebg-preview.png", "D3.png.png"),
-    "dice_4.png": ("D4.png-removebg-preview.png", "D4.png.png"),
-    "dice_5.png": ("D5.png-removebg-preview.png", "D5.png.png"),
-    "dice_6.png": ("D6.png-removebg-preview.png", "D6.png.png"),
 }
 
 SOURCE_RED_CHESS_PIECES = {
@@ -89,10 +68,6 @@ SOURCE_RED_CHESS_PIECES = {
         "rKing.png.png",
         "ChatGPT Image Mar 4, 2026, 08_18_12 PM.png",
     ),
-}
-
-SOURCE_BACKGAMMON_BOARDS = {
-    "backgammon_board_classic.png": ("Backgammonboard.png.png",),
 }
 
 OPTIONAL_TIME_BAR_VARIANTS = {
@@ -409,102 +384,6 @@ def _process_red_chess_piece(source_name: str, output_name: str) -> None:
     print(f"piece: {source_name} -> {output_path.relative_to(ROOT)}")
 
 
-def _process_coin(source_name: str, output_name: str) -> None:
-    source_path = ASSETS_DIR / source_name
-    output_path = SHESHBESH_DIR / output_name
-    image = Image.open(source_path).convert("RGBA")
-    alpha = image.split()[-1]
-    alpha_min, alpha_max = alpha.getextrema()
-
-    if alpha_min < alpha_max:
-        # Respect authored transparency when present (ruby coin source uses
-        # transparent background). This avoids re-cutting and introducing
-        # opaque fringe artifacts.
-        main_shape = _keep_largest_alpha_component(image, alpha_floor=1)
-    else:
-        cutout = _remove_edge_connected_background(
-            image,
-            tolerance=18,
-            blur_radius=0.35,
-        )
-        main_shape = _keep_largest_alpha_component(cutout, alpha_floor=10)
-    trimmed = _trim_transparency(main_shape)
-    square_piece = _compose_piece_canvas(
-        trimmed,
-        canvas_size=512,
-        fill_ratio=0.82,
-        bottom_padding_ratio=0.02,
-    )
-    _save_png(output_path, square_piece)
-    print(f"coin:  {source_name} -> {output_path.relative_to(ROOT)}")
-
-
-def _process_dice_face(source_name: str, output_name: str) -> None:
-    source_path = ASSETS_DIR / source_name
-    output_path = SHESHBESH_DIR / output_name
-    image = Image.open(source_path).convert("RGBA")
-    alpha = image.split()[-1]
-    alpha_min, alpha_max = alpha.getextrema()
-
-    if alpha_min < alpha_max:
-        # Some source faces (notably D1) include usable alpha but also
-        # translucent fringe noise. Use a strong alpha gate and keep only the
-        # largest connected component so the final die has clean edges.
-        gated_alpha = alpha.point(lambda v: 255 if v > 120 else 0)
-        masked = image.copy()
-        masked.putalpha(gated_alpha)
-        main_shape = _keep_largest_alpha_component(masked, alpha_floor=1)
-    else:
-        cutout = _remove_edge_connected_background(
-            image,
-            tolerance=18,
-            blur_radius=0.3,
-        )
-        main_shape = _keep_largest_alpha_component(cutout, alpha_floor=8)
-    trimmed = _trim_transparency(main_shape)
-    square = _compose_piece_canvas(
-        trimmed,
-        canvas_size=384,
-        fill_ratio=0.9,
-        bottom_padding_ratio=0.02,
-    )
-    _save_png(output_path, square)
-    print(f"dice:  {source_name} -> {output_path.relative_to(ROOT)}")
-
-
-def _normalize_backgammon_board(image: Image.Image) -> Image.Image:
-    rgba = image.convert("RGBA")
-    width, height = rgba.size
-    if width == height:
-        return rgba.resize(
-            (BACKGAMMON_BOARD_SIZE, BACKGAMMON_BOARD_SIZE),
-            Image.Resampling.LANCZOS,
-        )
-
-    # Normalize all skin boards to a square gameplay canvas so point overlays
-    # stay aligned regardless of source art aspect ratio.
-    if width > height:
-        offset = (width - height) // 2
-        cropped = rgba.crop((offset, 0, offset + height, height))
-    else:
-        offset = (height - width) // 2
-        cropped = rgba.crop((0, offset, width, offset + width))
-
-    return cropped.resize(
-        (BACKGAMMON_BOARD_SIZE, BACKGAMMON_BOARD_SIZE),
-        Image.Resampling.LANCZOS,
-    )
-
-
-def _process_backgammon_board(source_name: str, output_name: str) -> None:
-    source_path = ASSETS_DIR / source_name
-    output_path = SHESHBESH_DIR / output_name
-    image = Image.open(source_path)
-    normalized = _normalize_backgammon_board(image)
-    _save_png(output_path, normalized)
-    print(f"bgui:  {source_name} -> {output_path.relative_to(ROOT)}")
-
-
 def _process_board_image() -> None:
     source_path = ASSETS_DIR / "boardPearl.png.png"
     output_path = UI_DIR / "board.png"
@@ -568,18 +447,6 @@ def main() -> None:
     for output_name, candidates in SOURCE_RED_CHESS_PIECES.items():
         source_name = _resolve_source_name(label=output_name, candidates=candidates)
         _process_red_chess_piece(source_name, output_name)
-
-    for output_name, candidates in SOURCE_COINS.items():
-        source_name = _resolve_source_name(label=output_name, candidates=candidates)
-        _process_coin(source_name, output_name)
-
-    for output_name, candidates in SOURCE_DICE.items():
-        source_name = _resolve_source_name(label=output_name, candidates=candidates)
-        _process_dice_face(source_name, output_name)
-
-    for output_name, candidates in SOURCE_BACKGAMMON_BOARDS.items():
-        source_name = _resolve_source_name(label=output_name, candidates=candidates)
-        _process_backgammon_board(source_name, output_name)
 
     _process_board_image()
     _process_ui_image(

@@ -13,9 +13,6 @@ from this app via path dependency:
 - Shared multiplayer transport lifecycle lives there (`MultiplayerTransportClient`).
 - Chess rules/state handling stays in this repo.
 
-Split guidance for carving chess/backgammon into separate repos is in:
-- `docs/repo_split_playbook.md`
-
 ## App
 
 ```bash
