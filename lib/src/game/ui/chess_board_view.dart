@@ -14,6 +14,8 @@ class ChessBoardView extends StatelessWidget {
     this.playableSizeRatio = AppAssets.chessBoardPlayableSizeRatio,
     this.whitePieceSprites = AppAssets.pieceSprites,
     this.blackPieceSprites = AppAssets.pieceSprites,
+    this.whitePieceScale = _legacyPieceVisualScale,
+    this.blackPieceScale = _legacyPieceVisualScale,
     this.invertWhitePieceColors = false,
     this.invertBlackPieceColors = false,
     this.selectedSquare,
@@ -39,6 +41,8 @@ class ChessBoardView extends StatelessWidget {
   final double playableSizeRatio;
   final Map<String, String> whitePieceSprites;
   final Map<String, String> blackPieceSprites;
+  final double whitePieceScale;
+  final double blackPieceScale;
   final bool invertWhitePieceColors;
   final bool invertBlackPieceColors;
   final String? selectedSquare;
@@ -57,7 +61,7 @@ class ChessBoardView extends StatelessWidget {
   final ValueChanged<String> onSquareTap;
 
   static const String _files = 'abcdefgh';
-  static const double _pieceVisualScale = 1.8;
+  static const double _legacyPieceVisualScale = 1.8;
   static const TextStyle _pieceFallbackStyle = TextStyle(
     fontSize: 30,
     fontWeight: FontWeight.w700,
@@ -118,7 +122,6 @@ class ChessBoardView extends StatelessWidget {
                     itemBuilder: (context, index) {
                       final square = _squareForDisplayedCell(index);
                       final piece = pieces[square];
-                      final isDarkSquare = ((index ~/ 8) + (index % 8)).isOdd;
                       final isSelected = selectedSquare == square;
                       final isTarget = legalTargets.contains(square);
                       final isPrimaryMoveSquare =
@@ -251,8 +254,13 @@ class ChessBoardView extends StatelessWidget {
                                         constraints.maxWidth,
                                         constraints.maxHeight,
                                       );
+                                      final pieceScale =
+                                          piece == piece.toUpperCase()
+                                          ? whitePieceScale
+                                          : blackPieceScale;
                                       final pieceSize =
-                                          squareSize * _pieceVisualScale;
+                                          squareSize *
+                                          pieceScale.clamp(0.5, 2.2);
                                       return Center(
                                         child: SizedBox(
                                           width: pieceSize,
@@ -263,20 +271,6 @@ class ChessBoardView extends StatelessWidget {
                                     },
                                   ),
                                 ),
-                              Positioned(
-                                right: 3,
-                                bottom: 1,
-                                child: Text(
-                                  square,
-                                  style: TextStyle(
-                                    fontSize: 8,
-                                    fontWeight: FontWeight.w600,
-                                    color: isDarkSquare
-                                        ? Colors.white.withValues(alpha: 0.74)
-                                        : Colors.black.withValues(alpha: 0.52),
-                                  ),
-                                ),
-                              ),
                             ],
                           ),
                         ),

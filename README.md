@@ -320,3 +320,9 @@ Audio assets:
   https://kenney.nl/assets/interface-sounds  
   https://github.com/Calinou/kenney-interface-sounds
 - Included subset is under `assets/audio/ui/` with license file `LICENSE-Kenney-CC0.txt`.
+
+Chess board/piece assets:
+- Sashite Chess Assets (CC0)  
+  https://sashite.dev/assets/chess
+- Included CC0 subset is under `assets/generated/ui/board_sashite.png` and
+  `assets/generated/pieces/sashite/`.

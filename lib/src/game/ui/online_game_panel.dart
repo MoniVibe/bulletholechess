@@ -31,6 +31,7 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
     defaultValue: 'http://localhost:8080',
   );
   static const Set<String> _ownedChessPieceSkinIds = <String>{
+    'chess_sashite_western',
     'chess_classic',
     'chess_red_pieces',
   };
@@ -422,6 +423,8 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                     whiteChessPieceSkin.spriteMap,
                                 blackPieceSprites:
                                     blackChessPieceSkin.spriteMap,
+                                whitePieceScale: whiteChessPieceSkin.pieceScale,
+                                blackPieceScale: blackChessPieceSkin.pieceScale,
                                 invertBlackPieceColors: invertBlackPieceColors,
                                 selectedSquare: _controller.selectedSquare,
                                 legalTargets: _controller.legalTargets,

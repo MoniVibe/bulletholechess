@@ -19,6 +19,7 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
   static const Duration _aiTestingDelay = Duration(seconds: 3);
   static const List<int> _cooldownOptionsSeconds = <int>[2, 3, 5, 7, 10];
   static const Set<String> _ownedChessPieceSkinIds = <String>{
+    'chess_sashite_western',
     'chess_classic',
     'chess_red_pieces',
   };
@@ -324,6 +325,8 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                                 playableSizeRatio: boardSkin.playableSizeRatio,
                                 whitePieceSprites: whitePieceSkin.spriteMap,
                                 blackPieceSprites: blackPieceSkin.spriteMap,
+                                whitePieceScale: whitePieceSkin.pieceScale,
+                                blackPieceScale: blackPieceSkin.pieceScale,
                                 selectedSquare: _controller.selectedSquare,
                                 legalTargets: _controller.legalTargets,
                                 lastMoveFrom: _controller.playerLastMoveFrom,
