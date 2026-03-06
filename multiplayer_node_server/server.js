@@ -14,6 +14,9 @@ const DEFAULT_COOLDOWN_SECONDS = Number.parseInt(
 );
 const MIN_COOLDOWN_SECONDS = 1;
 const MAX_COOLDOWN_SECONDS = 30;
+const DEFAULT_PIECE_SKIN_ID = 'chess_classic';
+const MAX_PIECE_SKIN_ID_LENGTH = 40;
+const PIECE_SKIN_ID_PATTERN = /^[a-z0-9_-]+$/;
 const MATCH_TTL_MS = Number.parseInt(process.env.MATCH_TTL_MS || '0', 10);
 const MATCH_TIMEOUT_ENABLED =
   Number.isFinite(MATCH_TTL_MS) && MATCH_TTL_MS > 0;
@@ -155,6 +158,7 @@ wss.on('connection', (socket, req) => {
     matchId,
     playerId,
     color,
+    pieceSkinId: player.pieceSkinId ?? DEFAULT_PIECE_SKIN_ID,
     cooldownSeconds: Math.round(match.cooldownMs / 1000),
     serverNow: Date.now(),
   });
@@ -248,15 +252,22 @@ function joinOrCreate(req, res) {
   const requestedCooldownSeconds = sanitizeCooldownSeconds(
     req.body?.cooldownSeconds,
   );
+  const requestedPieceSkinId =
+    sanitizePieceSkinId(req.body?.pieceSkinId) ?? DEFAULT_PIECE_SKIN_ID;
 
   pruneExpiredMatches();
-  const assignment = assignPlayerToMatch(name, requestedCooldownSeconds);
+  const assignment = assignPlayerToMatch(
+    name,
+    requestedCooldownSeconds,
+    requestedPieceSkinId,
+  );
   logEvent('match_join_or_create', {
     matchId: assignment.match.matchId,
     playerId: assignment.playerId,
     color: assignment.color,
     created: assignment.created,
     cooldownSeconds: Math.round(assignment.match.cooldownMs / 1000),
+    pieceSkinId: requestedPieceSkinId,
     playerName: name,
   });
   const status = assignment.created ? 201 : 200;
@@ -266,15 +277,16 @@ function joinOrCreate(req, res) {
     color: assignment.color,
     wsPath: '/ws',
     cooldownSeconds: Math.round(assignment.match.cooldownMs / 1000),
+    pieceSkinId: requestedPieceSkinId,
   });
 }
 
-function assignPlayerToMatch(name, requestedCooldownSeconds) {
+function assignPlayerToMatch(name, requestedCooldownSeconds, pieceSkinId) {
   const waitingMatch = findJoinableMatch();
   if (waitingMatch) {
     const color = openColorForMatch(waitingMatch);
     const playerId = crypto.randomUUID();
-    const player = { playerId, name, socket: null };
+    const player = { playerId, name, socket: null, pieceSkinId };
     setColorSlot(waitingMatch, color, player);
     waitingMatch.playersById.set(playerId, color);
     waitingMatch.updatedAt = Date.now();
@@ -295,7 +307,7 @@ function assignPlayerToMatch(name, requestedCooldownSeconds) {
   const matchId = crypto.randomUUID();
   const playerId = crypto.randomUUID();
   const match = createEmptyMatch({ matchId, cooldownMs });
-  match.players.white = { playerId, name, socket: null };
+  match.players.white = { playerId, name, socket: null, pieceSkinId };
   match.playersById.set(playerId, 'w');
   matches.set(matchId, match);
   return {
@@ -614,6 +626,45 @@ function handleSocketMessage({ match, color, socket, payload }) {
       broadcastState(match);
       return;
     }
+    case 'set_piece_skin': {
+      const pieceSkinId = sanitizePieceSkinId(payload.pieceSkinId);
+      const player = playerForColor(match, color);
+      const playerId = player?.playerId ?? null;
+      if (!player) {
+        sendJson(socket, {
+          type: 'error',
+          message: 'Player slot unavailable.',
+        });
+        return;
+      }
+      if (!pieceSkinId) {
+        logEvent('piece_skin_rejected', {
+          matchId: match.matchId,
+          color,
+          playerId,
+          reason: 'invalid_skin_id',
+          pieceSkinId: payload.pieceSkinId,
+        });
+        sendJson(socket, {
+          type: 'error',
+          message: 'Invalid piece skin id.',
+        });
+        return;
+      }
+      if (player.pieceSkinId === pieceSkinId) {
+        return;
+      }
+      player.pieceSkinId = pieceSkinId;
+      match.updatedAt = Date.now();
+      logEvent('piece_skin_updated', {
+        matchId: match.matchId,
+        color,
+        playerId,
+        pieceSkinId,
+      });
+      broadcastState(match);
+      return;
+    }
     case 'ping':
       sendJson(socket, { type: 'pong', at: new Date().toISOString() });
       return;
@@ -668,6 +719,10 @@ function broadcastState(match, lastMove = null) {
     players: {
       w: match.players.white ? match.players.white.name : null,
       b: match.players.black ? match.players.black.name : null,
+    },
+    pieceSkins: {
+      w: match.players.white?.pieceSkinId ?? DEFAULT_PIECE_SKIN_ID,
+      b: match.players.black?.pieceSkinId ?? DEFAULT_PIECE_SKIN_ID,
     },
     cooldownMs: match.cooldownMs,
     cooldownSeconds: Math.round(match.cooldownMs / 1000),
@@ -855,6 +910,21 @@ function sanitizeMoveSource(value) {
     return value;
   }
   return 'unknown';
+}
+
+function sanitizePieceSkinId(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim();
+  if (
+    normalized.length < 1 ||
+    normalized.length > MAX_PIECE_SKIN_ID_LENGTH ||
+    !PIECE_SKIN_ID_PATTERN.test(normalized)
+  ) {
+    return null;
+  }
+  return normalized;
 }
 
 function pieceBelongsToColor(piece, color) {

@@ -16,6 +16,7 @@ This service provides:
 `POST /api/matches/join` and `POST /api/matches/create` accept:
 - `name` (required)
 - `cooldownSeconds` (optional, only used when creating a new waiting match)
+- `pieceSkinId` (optional, defaults to `chess_classic`)
 
 It runs matchmaking and authoritative move validation in one Node.js process.
 

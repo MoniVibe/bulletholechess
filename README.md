@@ -1,8 +1,17 @@
 # bulletholechess
 
-Bullethole Chess Flutter app with:
-- `Local vs Bot`
+Bullethole Chess Flutter app (chess-only repo).
+
+Primary mode:
 - `Online Prototype` (invite code multiplayer)
+
+## Shared package
+
+Game-agnostic code lives in the sibling shared repo and is consumed
+from this app via path dependency:
+- `../bullethole-shared`
+- Shared multiplayer transport lifecycle lives there (`MultiplayerTransportClient`).
+- Chess rules/state handling stays in this repo.
 
 ## App
 
@@ -10,6 +19,18 @@ Bullethole Chess Flutter app with:
 flutter pub get
 flutter run
 ```
+
+### Visual asset prep (new art drops)
+
+When replacing board/piece/time-bar images, preprocess them into transparent
+runtime assets:
+
+```bash
+python tool/prepare_visual_assets.py
+```
+
+Generated outputs are written to `assets/generated/` and are the files used by
+the app UI.
 
 ### Windows quick launch (double-click)
 

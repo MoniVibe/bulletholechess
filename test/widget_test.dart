@@ -1,17 +1,10 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:bulletholechess/main.dart';
 
 void main() {
-  testWidgets('loads MVP board shell with collapsible menu', (
+  testWidgets('loads chess shell with AI and online modes', (
     WidgetTester tester,
   ) async {
     tester.view.physicalSize = const Size(1400, 2200);
@@ -25,15 +18,18 @@ void main() {
     await tester.pump();
 
     expect(find.byType(AppBar), findsNothing);
-    expect(find.text('Game Menu'), findsOneWidget);
-    expect(find.textContaining('Moves:'), findsOneWidget);
-    expect(find.byKey(const ValueKey('top_bar')), findsOneWidget);
-    expect(find.byKey(const ValueKey('bottom_bar')), findsOneWidget);
+    expect(find.text('Chess Vs AI'), findsOneWidget);
+    expect(find.text('Vs AI'), findsOneWidget);
+    expect(find.text('Play As'), findsOneWidget);
+    expect(find.text('New Game'), findsOneWidget);
 
-    await tester.tap(find.text('Game Menu'));
+    await tester.tap(find.text('Online').first);
     await tester.pumpAndSettle();
 
-    expect(find.text('New Game'), findsOneWidget);
+    expect(find.text('Matchmaking'), findsOneWidget);
+    expect(find.text('Backend URL'), findsOneWidget);
+    expect(find.text('Display Name'), findsOneWidget);
     expect(find.text('Cooldown (seconds)'), findsOneWidget);
+    expect(find.text('Check Status'), findsOneWidget);
   });
 }
