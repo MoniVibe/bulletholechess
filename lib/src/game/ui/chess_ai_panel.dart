@@ -327,6 +327,8 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                                 blackPieceSprites: blackPieceSkin.spriteMap,
                                 whitePieceScale: whitePieceSkin.pieceScale,
                                 blackPieceScale: blackPieceSkin.pieceScale,
+                                whitePieceYOffset: whitePieceSkin.pieceYOffset,
+                                blackPieceYOffset: blackPieceSkin.pieceYOffset,
                                 selectedSquare: _controller.selectedSquare,
                                 legalTargets: _controller.legalTargets,
                                 lastMoveFrom: _controller.playerLastMoveFrom,

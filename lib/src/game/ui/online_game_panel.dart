@@ -425,6 +425,10 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                     blackChessPieceSkin.spriteMap,
                                 whitePieceScale: whiteChessPieceSkin.pieceScale,
                                 blackPieceScale: blackChessPieceSkin.pieceScale,
+                                whitePieceYOffset:
+                                    whiteChessPieceSkin.pieceYOffset,
+                                blackPieceYOffset:
+                                    blackChessPieceSkin.pieceYOffset,
                                 invertBlackPieceColors: invertBlackPieceColors,
                                 selectedSquare: _controller.selectedSquare,
                                 legalTargets: _controller.legalTargets,

@@ -37,8 +37,8 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: e571c5290fb09a82358571303da01ae230f713dd
-      resolved-ref: e571c5290fb09a82358571303da01ae230f713dd
+      ref: "5bd4bd2f0b0f5c38f3436c2be0d8a2d33df330ac"
+      resolved-ref: "5bd4bd2f0b0f5c38f3436c2be0d8a2d33df330ac"
       url: "https://github.com/meshik/pureflutter.git"
     source: git
     version: "0.1.0"

@@ -16,6 +16,8 @@ class ChessBoardView extends StatelessWidget {
     this.blackPieceSprites = AppAssets.pieceSprites,
     this.whitePieceScale = _legacyPieceVisualScale,
     this.blackPieceScale = _legacyPieceVisualScale,
+    this.whitePieceYOffset = _legacyPieceVisualYOffset,
+    this.blackPieceYOffset = _legacyPieceVisualYOffset,
     this.invertWhitePieceColors = false,
     this.invertBlackPieceColors = false,
     this.selectedSquare,
@@ -43,6 +45,8 @@ class ChessBoardView extends StatelessWidget {
   final Map<String, String> blackPieceSprites;
   final double whitePieceScale;
   final double blackPieceScale;
+  final double whitePieceYOffset;
+  final double blackPieceYOffset;
   final bool invertWhitePieceColors;
   final bool invertBlackPieceColors;
   final String? selectedSquare;
@@ -61,7 +65,8 @@ class ChessBoardView extends StatelessWidget {
   final ValueChanged<String> onSquareTap;
 
   static const String _files = 'abcdefgh';
-  static const double _legacyPieceVisualScale = 1.8;
+  static const double _legacyPieceVisualScale = 1.36;
+  static const double _legacyPieceVisualYOffset = -0.04;
   static const TextStyle _pieceFallbackStyle = TextStyle(
     fontSize: 30,
     fontWeight: FontWeight.w700,
@@ -258,14 +263,25 @@ class ChessBoardView extends StatelessWidget {
                                           piece == piece.toUpperCase()
                                           ? whitePieceScale
                                           : blackPieceScale;
+                                      final pieceYOffset =
+                                          piece == piece.toUpperCase()
+                                          ? whitePieceYOffset
+                                          : blackPieceYOffset;
                                       final pieceSize =
                                           squareSize *
                                           pieceScale.clamp(0.5, 2.2);
                                       return Center(
-                                        child: SizedBox(
-                                          width: pieceSize,
-                                          height: pieceSize,
-                                          child: _buildPieceSprite(piece),
+                                        child: Transform.translate(
+                                          offset: Offset(
+                                            0,
+                                            squareSize *
+                                                pieceYOffset.clamp(-0.4, 0.4),
+                                          ),
+                                          child: SizedBox(
+                                            width: pieceSize,
+                                            height: pieceSize,
+                                            child: _buildPieceSprite(piece),
+                                          ),
                                         ),
                                       );
                                     },
