@@ -66,6 +66,7 @@ class _ChessGameScreenState extends State<ChessGameScreen> {
                         ),
                       ),
                       CompactModeSwitch(
+                        key: const ValueKey<String>('chess_mode_switch'),
                         onlineSelected: _mode == _ChessMode.online,
                         onChanged: (online) {
                           setState(() {

@@ -158,6 +158,7 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                 child: Column(
                   children: [
                     TextField(
+                      key: const ValueKey<String>('chess_online_backend_url'),
                       controller: _apiBaseController,
                       decoration: const InputDecoration(
                         labelText: 'Backend URL',
@@ -168,6 +169,7 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                     ),
                     const SizedBox(height: 8),
                     TextField(
+                      key: const ValueKey<String>('chess_online_display_name'),
                       controller: _nameController,
                       decoration: const InputDecoration(
                         labelText: 'Display Name',
@@ -278,6 +280,9 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                       children: [
                         Expanded(
                           child: FilledButton.icon(
+                            key: const ValueKey<String>(
+                              'chess_online_find_match',
+                            ),
                             onPressed: canStart ? _findMatch : null,
                             icon: const AppAssetIcon(
                               AppAssets.newGameIcon,
@@ -290,6 +295,9 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: OutlinedButton(
+                            key: const ValueKey<String>(
+                              'chess_online_disconnect',
+                            ),
                             onPressed: connected ? _disconnect : null,
                             child: const Text('Disconnect'),
                           ),
@@ -309,6 +317,7 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                     Align(
                       alignment: Alignment.centerLeft,
                       child: OutlinedButton.icon(
+                        key: const ValueKey<String>('chess_online_new_game'),
                         onPressed: connected
                             ? () => _controller.requestNewGame(
                                 cooldownSeconds: _selectedCooldownSeconds,
@@ -443,6 +452,9 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                     ),
                                     child: Center(
                                       child: FilledButton.icon(
+                                        key: const ValueKey<String>(
+                                          'chess_online_find_match_overlay',
+                                        ),
                                         onPressed: canStart ? _findMatch : null,
                                         icon: const AppAssetIcon(
                                           AppAssets.newGameIcon,

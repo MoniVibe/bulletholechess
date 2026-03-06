@@ -67,6 +67,7 @@ class ChessBoardView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
+      key: const ValueKey<String>('chess_board_surface'),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         boxShadow: <BoxShadow>[
@@ -152,6 +153,7 @@ class ChessBoardView extends StatelessWidget {
                       return Material(
                         color: squareOverlayColor,
                         child: InkWell(
+                          key: ValueKey<String>('chess_square_$square'),
                           onTap: () => onSquareTap(square),
                           splashColor: const Color(
                             0xFF00BCD4,
@@ -171,6 +173,7 @@ class ChessBoardView extends StatelessWidget {
                                 ),
                               if (isTarget)
                                 Center(
+                                  key: ValueKey<String>('chess_target_$square'),
                                   child: piece == null
                                       ? Container(
                                           width: 14,

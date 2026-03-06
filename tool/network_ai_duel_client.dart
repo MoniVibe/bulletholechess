@@ -14,37 +14,55 @@ import 'package:bulletholechess/src/game/engine/chess_rules.dart';
 import 'package:bulletholechess/src/game/engine/dumb_ai_engine.dart';
 
 Future<void> main(List<String> args) async {
-  final config = _Config.parse(args);
-  final logger = _JsonlLogger(path: config.logFilePath);
-  await logger.log(<String, Object?>{
-    'event': 'client_start',
-    'at': DateTime.now().toIso8601String(),
-    'backendUrl': config.backendUrl,
-    'name': config.displayName,
-    'seed': config.seed,
-    'cooldownSeconds': config.cooldownSeconds,
-  });
+  await runZoned(
+    () async {
+      final config = _Config.parse(args);
+      final logger = _JsonlLogger(path: config.logFilePath);
+      await logger.log(<String, Object?>{
+        'event': 'client_start',
+        'at': DateTime.now().toIso8601String(),
+        'backendUrl': config.backendUrl,
+        'name': config.displayName,
+        'seed': config.seed,
+        'cooldownSeconds': config.cooldownSeconds,
+      });
 
-  final httpClient = http.Client();
-  final transport = MultiplayerTransportClient(
-    httpClient: httpClient,
-    requestTimeout: const Duration(seconds: 10),
+      final httpClient = http.Client();
+      final transport = MultiplayerTransportClient(
+        httpClient: httpClient,
+        requestTimeout: const Duration(seconds: 10),
+      );
+
+      final session = _ChessNetworkAiSession(
+        config: config,
+        transport: transport,
+        logger: logger,
+      );
+
+      try {
+        await session.run();
+      } finally {
+        await transport.disconnect();
+        transport.dispose();
+        httpClient.close();
+        await logger.close();
+      }
+    },
+    zoneSpecification: ZoneSpecification(
+      print: (self, parent, zone, line) {
+        if (_isSuppressedNoiseLine(line)) {
+          return;
+        }
+        parent.print(zone, line);
+      },
+    ),
   );
+}
 
-  final session = _ChessNetworkAiSession(
-    config: config,
-    transport: transport,
-    logger: logger,
-  );
-
-  try {
-    await session.run();
-  } finally {
-    await transport.disconnect();
-    transport.dispose();
-    httpClient.close();
-    await logger.close();
-  }
+bool _isSuppressedNoiseLine(String line) {
+  final normalized = line.trim().toLowerCase();
+  return normalized == 'player is in check.' ||
+      normalized == 'king of opponent player is in check.';
 }
 
 class _ChessNetworkAiSession {
