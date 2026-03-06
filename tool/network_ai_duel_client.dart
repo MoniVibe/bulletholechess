@@ -68,6 +68,9 @@ class _ChessNetworkAiSession {
   int _sequence = 0;
   int _clockOffsetMs = 0;
   bool _moveInFlight = false;
+  int _nextClientMoveId = 1;
+  int? _inFlightClientMoveId;
+  int? _lastAttemptSequence;
   final Map<String, int> _cooldownEndsAt = <String, int>{'w': 0, 'b': 0};
   Map<String, dynamic>? _forfeitLock;
   bool _disposed = false;
@@ -153,6 +156,7 @@ class _ChessNetworkAiSession {
         return;
       case 'error':
         _moveInFlight = false;
+        _inFlightClientMoveId = null;
         _updateClockOffset(message['serverNow']);
         _updateCooldownSnapshot(message['cooldownEndsAt']);
         _forfeitLock = _readMap(message['forfeitLock']) ?? _forfeitLock;
@@ -202,11 +206,21 @@ class _ChessNetworkAiSession {
     _updateCooldownSnapshot(message['cooldownEndsAt']);
     _forfeitLock = _readMap(message['forfeitLock']) ?? _forfeitLock;
 
-    final turnColor = message['turn'] as String?;
-    if (_myColor != null && turnColor != null) {
-      final moverColor = ChessRules.oppositeColor(turnColor);
-      if (moverColor == _myColor) {
+    final lastMove = _readMap(message['lastMove']);
+    if (_inFlightClientMoveId != null && lastMove != null) {
+      final ackMoveId = MultiplayerClientUtils.readInt(
+        lastMove['clientMoveId'],
+      );
+      if (ackMoveId != null && ackMoveId == _inFlightClientMoveId) {
         _moveInFlight = false;
+        _inFlightClientMoveId = null;
+        logger.log(<String, Object?>{
+          'event': 'move_acked',
+          'at': DateTime.now().toIso8601String(),
+          'clientMoveId': ackMoveId,
+          'from': lastMove['from'],
+          'to': lastMove['to'],
+        });
       }
     }
 
@@ -242,6 +256,9 @@ class _ChessNetworkAiSession {
       return;
     }
     if (_moveInFlight) {
+      return;
+    }
+    if (_lastAttemptSequence != null && _lastAttemptSequence == _sequence) {
       return;
     }
     final myColor = _myColor;
@@ -281,21 +298,26 @@ class _ChessNetworkAiSession {
       return;
     }
 
+    final clientMoveId = _nextClientMoveId++;
     final sent = transport.sendJson(<String, dynamic>{
       'type': 'move',
       'from': move.from,
       'to': move.to,
       'promotion': move.promotion,
       'source': 'manual',
+      'clientMoveId': clientMoveId,
     });
     if (!sent) {
       return;
     }
 
+    _lastAttemptSequence = _sequence;
     _moveInFlight = true;
+    _inFlightClientMoveId = clientMoveId;
     logger.log(<String, Object?>{
       'event': 'move_sent',
       'at': DateTime.now().toIso8601String(),
+      'clientMoveId': clientMoveId,
       'color': myColor,
       'from': move.from,
       'to': move.to,
@@ -476,8 +498,8 @@ class _Config {
     if (displayName.isEmpty) {
       throw ArgumentError('--name must not be empty');
     }
-    if (cooldownSeconds <= 0) {
-      throw ArgumentError('--cooldown-seconds must be > 0');
+    if (cooldownSeconds < 0) {
+      throw ArgumentError('--cooldown-seconds must be >= 0');
     }
     if (pollMs <= 0) {
       throw ArgumentError('--poll-ms must be > 0');
@@ -513,7 +535,7 @@ Never _printUsageAndExit() {
   print(
     'Usage: dart run tool/network_ai_duel_client.dart '
     '[--backend-url=http://localhost:8080] [--name=ChessAI-A] '
-    '[--cooldown-seconds=3] [--seed=123] [--poll-ms=120] '
+    '[--cooldown-seconds=0] [--seed=123] [--poll-ms=120] '
     '[--log-file=debug/chess-network.jsonl] [--stay-alive]',
   );
   exit(0);

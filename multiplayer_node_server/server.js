@@ -12,7 +12,10 @@ const DEFAULT_COOLDOWN_SECONDS = Number.parseInt(
   process.env.DEFAULT_COOLDOWN_SECONDS || '3',
   10,
 );
-const MIN_COOLDOWN_SECONDS = 1;
+const MIN_COOLDOWN_SECONDS = Number.parseInt(
+  process.env.MIN_COOLDOWN_SECONDS || '1',
+  10,
+);
 const MAX_COOLDOWN_SECONDS = 30;
 const DEFAULT_PIECE_SKIN_ID = 'chess_classic';
 const DEFAULT_GAME_TYPE = 'chess';
