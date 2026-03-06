@@ -389,6 +389,7 @@ class OnlineGameController extends ChangeNotifier {
         displayName: normalizedName,
         pieceSkinId: _myPieceSkinId,
         cooldownSeconds: cooldownSeconds,
+        gameType: 'chess',
       );
       if (joined.cooldownSeconds != null && joined.cooldownSeconds! > 0) {
         _cooldownDuration = Duration(seconds: joined.cooldownSeconds!);

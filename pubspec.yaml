@@ -39,7 +39,7 @@ dependencies:
   bullethole_shared:
     git:
       url: https://github.com/meshik/pureflutter.git
-      ref: 9bb18051bace6d271c0bfadaf88ea511f6de7e9a
+      ref: af19e184c6b4f3fc8ba6714b00000ee64bd8b232
 
 dev_dependencies:
   flutter_test:

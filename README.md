@@ -119,6 +119,26 @@ Optional CLI usage:
 .\run-ai-duel.ps1 -Games 150 -MaxConversionFailures 3
 ```
 
+### Cross-machine headless AI-vs-AI (multiplayer transport smoke)
+
+This repo now includes a thin network client that uses chess game logic + shared
+transport only (no UI dependency in the script itself):
+
+```powershell
+.\run-network-ai-duel.ps1 -BackendUrl http://<server-ip>:8080 -Name ChessAI-A
+```
+
+Direct CLI:
+
+```powershell
+dart run tool/network_ai_duel_client.dart --backend-url=http://<server-ip>:8080 --name=ChessAI-A --cooldown-seconds=3 --log-file=debug/chess-ai-a.jsonl
+```
+
+Run one client per machine (different `--name`) against the same backend URL.
+Telemetry is written as JSONL under `debug/`.
+
+Full two-machine checklist: `docs/multiplayer_smoke_lab.md`.
+
 ## Flutter Side-Project CI Clone
 
 This repo now includes a dedicated Flutter-only CI lane that is separate from Azure deploy workflows:
