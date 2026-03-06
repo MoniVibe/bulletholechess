@@ -39,7 +39,7 @@ dependencies:
   bullethole_shared:
     git:
       url: https://github.com/meshik/pureflutter.git
-      ref: af19e184c6b4f3fc8ba6714b00000ee64bd8b232
+      ref: 389158c22463e92165ed503633814ce654f19266
 
 dev_dependencies:
   flutter_test:
@@ -74,6 +74,7 @@ flutter:
     - assets/rematch.png
     - assets/feedback.png
     - assets/Boardalt.png.png
+    - assets/audio/ui/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

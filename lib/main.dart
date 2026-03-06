@@ -11,16 +11,18 @@ class BulletholeChessApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const primary = Color(0xFF1B3F59);
-    const secondary = Color(0xFFE6A23C);
-    const surface = Color(0xFFF4F2EE);
-    const onSurface = Color(0xFF191A1C);
+    const primary = Color(0xFF2B7FFF);
+    const secondary = Color(0xFFE2A84A);
+    const tertiary = Color(0xFF34C9A5);
+    const surface = Color(0xFFF5F7FB);
+    const onSurface = Color(0xFF122033);
 
     final baseTheme = ThemeData(
       useMaterial3: true,
       colorScheme: const ColorScheme.light(
         primary: primary,
         secondary: secondary,
+        tertiary: tertiary,
         surface: surface,
         onSurface: onSurface,
       ),
@@ -50,26 +52,49 @@ class BulletholeChessApp extends StatelessWidget {
               ),
             ),
         cardTheme: CardThemeData(
-          color: const Color(0xF2FFFFFF),
-          elevation: 0,
+          color: const Color(0xD9FFFFFF),
+          elevation: 8,
+          shadowColor: Colors.black.withValues(alpha: 0.08),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
             side: BorderSide(
-              color: Colors.black.withValues(alpha: 0.07),
+              color: Colors.white.withValues(alpha: 0.58),
               width: 1,
+            ),
+          ),
+        ),
+        filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(
+            backgroundColor: primary,
+            foregroundColor: Colors.white,
+            textStyle: const TextStyle(fontWeight: FontWeight.w700),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: onSurface,
+            side: BorderSide(color: primary.withValues(alpha: 0.34)),
+            textStyle: const TextStyle(fontWeight: FontWeight.w600),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
             ),
           ),
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
-          fillColor: const Color(0xCCFFFFFF),
+          fillColor: const Color(0xF0FFFFFF),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.2)),
+            borderSide: BorderSide(color: primary.withValues(alpha: 0.25)),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.12)),
+            borderSide: BorderSide(color: primary.withValues(alpha: 0.18)),
           ),
         ),
       ),

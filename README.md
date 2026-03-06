@@ -300,3 +300,23 @@ For production scale and reliability you should add:
 - metrics/rate limits/abuse controls
 
 `Node.js for matchmaking` is a good choice, but not mandatory. It is a practical fit due to mature WebSocket ecosystem, I/O performance, and easy horizontal scaling with Redis.
+
+## UI polish references and assets
+
+This branch starts UI modernization with stronger readability, clearer state feedback, and better control affordances.
+
+Design references:
+- Nielsen Norman Group: 10 usability heuristics  
+  https://www.nngroup.com/articles/ten-usability-heuristics/
+- WCAG 2.2 contrast and non-text contrast guidance  
+  https://www.w3.org/TR/WCAG22/
+- Android accessibility touch target guidance (48dp)  
+  https://support.google.com/accessibility/android/answer/7101858
+- Game Accessibility Guidelines (basic checklist)  
+  https://gameaccessibilityguidelines.com/basic/
+
+Audio assets:
+- Kenney Interface Sounds (CC0)  
+  https://kenney.nl/assets/interface-sounds  
+  https://github.com/Calinou/kenney-interface-sounds
+- Included subset is under `assets/audio/ui/` with license file `LICENSE-Kenney-CC0.txt`.
