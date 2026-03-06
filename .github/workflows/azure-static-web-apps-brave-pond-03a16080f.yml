@@ -35,6 +35,8 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+      - name: Verify shared dependency pin
+        run: dart tool/verify_shared_dependency.dart
       - name: Install dependencies
         run: flutter pub get
       - name: Build Flutter web

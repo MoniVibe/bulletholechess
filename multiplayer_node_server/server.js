@@ -160,6 +160,7 @@ wss.on('connection', (socket, req) => {
     color,
     pieceSkinId: player.pieceSkinId ?? DEFAULT_PIECE_SKIN_ID,
     cooldownSeconds: Math.round(match.cooldownMs / 1000),
+    forfeitLock: serializeForfeitLock(match.forfeitLock),
     serverNow: Date.now(),
   });
   broadcastState(match);
@@ -203,6 +204,7 @@ wss.on('connection', (socket, req) => {
     const now = Date.now();
     match.cooldownEndsAt.w = now;
     match.cooldownEndsAt.b = now;
+    clearForfeitLock(match);
     match.updatedAt = now;
 
     if (!match.players.white && !match.players.black) {
@@ -416,6 +418,35 @@ function handleSocketMessage({ match, color, socket, payload }) {
       }
 
       const now = Date.now();
+      maybeResolveForfeitLockTimeout(match, now);
+      if (isColorBlockedByForfeitLock(match, color)) {
+        const releaseByColor = match.forfeitLock.releaseByColor;
+        const releaseReadyAt = releaseByColor
+          ? match.cooldownEndsAt[releaseByColor] || 0
+          : 0;
+        const remainingMs = Math.max(0, releaseReadyAt - now);
+        logEvent('move_rejected', {
+          matchId: match.matchId,
+          color,
+          playerId,
+          reason: 'forfeit_waiting_release',
+          blockedColor: match.forfeitLock.blockedColor,
+          releaseByColor,
+          remainingMs,
+        });
+        sendJson(socket, {
+          type: 'error',
+          message: 'You forfeited the overdue turn. Wait for the opponent move or timeout.',
+          code: 'forfeit_waiting_release',
+          blockedColor: match.forfeitLock.blockedColor,
+          releaseByColor,
+          remainingMs,
+          cooldownEndsAt: match.cooldownEndsAt,
+          forfeitLock: serializeForfeitLock(match.forfeitLock),
+          serverNow: now,
+        });
+        return;
+      }
       const readyAt = match.cooldownEndsAt[color] || 0;
       if (now < readyAt) {
         logEvent('move_rejected', {
@@ -556,6 +587,7 @@ function handleSocketMessage({ match, color, socket, payload }) {
         return;
       }
 
+      const nominalTurnColor = match.game.turn();
       const movePayload = movePayloadFromLegalMove(legalMove);
       const moved = withColorTurn(match.game, color, () =>
         match.game.move(movePayload),
@@ -578,6 +610,22 @@ function handleSocketMessage({ match, color, socket, payload }) {
       }
 
       setCooldownForMover(match, color, now);
+      if (
+        match.forfeitLock.blockedColor === nominalTurnColor &&
+        match.forfeitLock.releaseByColor === color
+      ) {
+        clearForfeitLock(match);
+      } else if (nominalTurnColor !== color) {
+        setForfeitLock(match, {
+          blockedColor: nominalTurnColor,
+          releaseByColor: color,
+        });
+      } else if (
+        match.forfeitLock.releaseByColor === color &&
+        match.forfeitLock.blockedColor
+      ) {
+        clearForfeitLock(match);
+      }
       match.updatedAt = now;
       logEvent('move_accepted', {
         matchId: match.matchId,
@@ -593,6 +641,7 @@ function handleSocketMessage({ match, color, socket, payload }) {
           w: match.cooldownEndsAt.w,
           b: match.cooldownEndsAt.b,
         },
+        forfeitLock: serializeForfeitLock(match.forfeitLock),
       });
       broadcastState(match, {
         from,
@@ -616,6 +665,7 @@ function handleSocketMessage({ match, color, socket, payload }) {
       const now = Date.now();
       match.cooldownEndsAt.w = now;
       match.cooldownEndsAt.b = now;
+      clearForfeitLock(match);
       match.updatedAt = now;
       logEvent('new_game', {
         matchId: match.matchId,
@@ -695,6 +745,10 @@ function createEmptyMatch({ matchId, cooldownMs }) {
     sequence: 0,
     cooldownMs,
     cooldownEndsAt: { w: now, b: now },
+    forfeitLock: {
+      blockedColor: null,
+      releaseByColor: null,
+    },
     createdAt: now,
     updatedAt: now,
   };
@@ -727,6 +781,7 @@ function broadcastState(match, lastMove = null) {
     cooldownMs: match.cooldownMs,
     cooldownSeconds: Math.round(match.cooldownMs / 1000),
     cooldownEndsAt: match.cooldownEndsAt,
+    forfeitLock: serializeForfeitLock(match.forfeitLock),
     serverNow: Date.now(),
   };
 
@@ -799,11 +854,47 @@ function setCooldownForMover(match, moverColor, atMs) {
   const nextReady = atMs + match.cooldownMs;
   if (moverColor === 'w') {
     match.cooldownEndsAt.w = nextReady;
-    match.cooldownEndsAt.b = atMs;
     return;
   }
   match.cooldownEndsAt.b = nextReady;
-  match.cooldownEndsAt.w = atMs;
+}
+
+function setForfeitLock(match, { blockedColor, releaseByColor }) {
+  if (!['w', 'b'].includes(blockedColor) || !['w', 'b'].includes(releaseByColor)) {
+    return;
+  }
+  match.forfeitLock.blockedColor = blockedColor;
+  match.forfeitLock.releaseByColor = releaseByColor;
+}
+
+function clearForfeitLock(match) {
+  match.forfeitLock.blockedColor = null;
+  match.forfeitLock.releaseByColor = null;
+}
+
+function maybeResolveForfeitLockTimeout(match, nowMs) {
+  const releaseByColor = match.forfeitLock.releaseByColor;
+  if (!releaseByColor) {
+    return;
+  }
+  const releaseReadyAt = match.cooldownEndsAt[releaseByColor] || 0;
+  if (nowMs >= releaseReadyAt) {
+    clearForfeitLock(match);
+  }
+}
+
+function isColorBlockedByForfeitLock(match, color) {
+  return match.forfeitLock.blockedColor === color;
+}
+
+function serializeForfeitLock(lock) {
+  if (!lock) {
+    return { blockedColor: null, releaseByColor: null };
+  }
+  return {
+    blockedColor: lock.blockedColor ?? null,
+    releaseByColor: lock.releaseByColor ?? null,
+  };
 }
 
 function getTerminalStatus(game) {

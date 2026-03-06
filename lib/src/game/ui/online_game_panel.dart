@@ -96,6 +96,36 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
         );
         final whiteRemaining = _controller.cooldownRemaining('w');
         final blackRemaining = _controller.cooldownRemaining('b');
+        final timerHasStarted =
+            _controller.hasActiveGame &&
+            (_controller.lastMoveFrom != null &&
+                _controller.lastMoveTo != null);
+
+        String? activeWindowColor() {
+          if (!_controller.isMatchActive || !timerHasStarted) {
+            return null;
+          }
+          return _controller.turnColor;
+        }
+
+        Duration activeWindowRemaining() {
+          final active = activeWindowColor();
+          if (active == null) {
+            return Duration.zero;
+          }
+          return active == 'w' ? blackRemaining : whiteRemaining;
+        }
+
+        Duration displayedRemainingForColor(String color) {
+          final active = activeWindowColor();
+          if (active == null || color != active) {
+            return Duration.zero;
+          }
+          return activeWindowRemaining();
+        }
+
+        bool isActiveWindowForColor(String color) =>
+            activeWindowColor() == color;
 
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -311,25 +341,41 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                 ),
               ),
               const SizedBox(height: 10),
+              _buildTimingHud(
+                isMatchActive: _controller.isMatchActive,
+                timerHasStarted: timerHasStarted,
+                activeWindowColor: activeWindowColor(),
+                isPlayerWindow:
+                    activeWindowColor() != null &&
+                    activeWindowColor() == _controller.myColor,
+                remaining: activeWindowRemaining(),
+              ),
+              const SizedBox(height: 10),
               Expanded(
                 child: Center(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      const horizontalBarHeight = 58.0;
-                      const verticalBarWidth = 64.0;
+                      const baseHorizontalBarHeight = 58.0;
+                      const baseVerticalBarWidth = 64.0;
                       const boardGap = 10.0;
+                      final showTimeBars = _controller.isMatchActive;
+                      final horizontalBarHeight = showTimeBars
+                          ? baseHorizontalBarHeight
+                          : 0.0;
+                      final verticalBarWidth = showTimeBars
+                          ? baseVerticalBarWidth
+                          : 0.0;
+                      final edgeGap = showTimeBars ? boardGap : 0.0;
                       final topColor = _controller.playerColor == 'w'
                           ? 'b'
                           : 'w';
                       final bottomColor = _controller.playerColor;
                       final whiteIsPlayer = _controller.myColor == 'w';
                       final blackIsPlayer = _controller.myColor == 'b';
-                      final topRemaining = topColor == 'w'
-                          ? whiteRemaining
-                          : blackRemaining;
-                      final bottomRemaining = bottomColor == 'w'
-                          ? whiteRemaining
-                          : blackRemaining;
+                      final topRemaining = displayedRemainingForColor(topColor);
+                      final bottomRemaining = displayedRemainingForColor(
+                        bottomColor,
+                      );
                       final topIsPlayer = topColor == 'w'
                           ? whiteIsPlayer
                           : blackIsPlayer;
@@ -381,6 +427,10 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                 ),
                                 queuedMoveFrom: _controller.queuedMoveFrom,
                                 queuedMoveTo: _controller.queuedMoveTo,
+                                checkedKingSquares:
+                                    _controller.checkedKingSquares,
+                                isCheckmate: _isOnlineCheckmate(),
+                                boardMessage: _onlineBoardMessage(),
                                 onSquareTap: _controller.tapSquare,
                               ),
                               if (!_controller.isConnected)
@@ -429,6 +479,20 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                       ),
                                     ),
                                   ),
+                                )
+                              else if (_controller.isGameOver)
+                                Positioned.fill(
+                                  child: _buildVictoryOverlay(
+                                    title: _onlineVictoryTitle(),
+                                    subtitle: _onlineVictorySubtitle(),
+                                    actionLabel: 'Request New Game',
+                                    onAction: () {
+                                      _controller.requestNewGame(
+                                        cooldownSeconds:
+                                            _selectedCooldownSeconds,
+                                      );
+                                    },
+                                  ),
                                 ),
                             ],
                           ),
@@ -440,7 +504,7 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                           constraints.maxHeight,
                           constraints.maxWidth -
                               (verticalBarWidth * 2) -
-                              (boardGap * 2),
+                              (edgeGap * 2),
                         );
                         if (boardSize <= 0) {
                           return const SizedBox.shrink();
@@ -450,12 +514,103 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                           width:
                               boardSize +
                               (verticalBarWidth * 2) +
-                              (boardGap * 2),
+                              (edgeGap * 2),
                           height: boardSize,
                           child: Row(
                             children: [
+                              if (showTimeBars)
+                                SizedBox(
+                                  width: verticalBarWidth,
+                                  child: CooldownMeter(
+                                    label: topColor == 'w' ? 'W' : 'B',
+                                    remaining: topRemaining,
+                                    total: _controller.cooldownDuration,
+                                    horizontalPrimaryAssetPath:
+                                        AppAssets.horizontalTimeBarAccent,
+                                    horizontalFallbackAssetPath:
+                                        AppAssets.horizontalTimeBar,
+                                    verticalPrimaryAssetPath:
+                                        AppAssets.verticalTimeBarAccent,
+                                    verticalFallbackAssetPath:
+                                        AppAssets.verticalTimeBar,
+                                    orientation: TimeBarOrientation.vertical,
+                                    activeColor: topActiveColor,
+                                    isPlayerSide: topIsPlayer,
+                                    timeLabel: _formatDuration(topRemaining),
+                                    readyToFlash:
+                                        _controller.isConnected &&
+                                        showTimeBars &&
+                                        timerHasStarted &&
+                                        isActiveWindowForColor(topColor) &&
+                                        !_controller.isGameOver &&
+                                        topRemaining.inMilliseconds == 0,
+                                    flashTint: topFlashTint,
+                                    flashDuration: const Duration(
+                                      milliseconds: 700,
+                                    ),
+                                  ),
+                                ),
+                              if (edgeGap > 0) SizedBox(width: edgeGap),
+                              buildBoardStack(boardSize),
+                              if (edgeGap > 0) SizedBox(width: edgeGap),
+                              if (showTimeBars)
+                                SizedBox(
+                                  width: verticalBarWidth,
+                                  child: CooldownMeter(
+                                    label: bottomColor == 'w' ? 'W' : 'B',
+                                    remaining: bottomRemaining,
+                                    total: _controller.cooldownDuration,
+                                    horizontalPrimaryAssetPath:
+                                        AppAssets.horizontalTimeBarAccent,
+                                    horizontalFallbackAssetPath:
+                                        AppAssets.horizontalTimeBar,
+                                    verticalPrimaryAssetPath:
+                                        AppAssets.verticalTimeBarAccent,
+                                    verticalFallbackAssetPath:
+                                        AppAssets.verticalTimeBar,
+                                    orientation: TimeBarOrientation.vertical,
+                                    activeColor: bottomActiveColor,
+                                    isPlayerSide: bottomIsPlayer,
+                                    timeLabel: _formatDuration(bottomRemaining),
+                                    readyToFlash:
+                                        _controller.isConnected &&
+                                        showTimeBars &&
+                                        timerHasStarted &&
+                                        isActiveWindowForColor(bottomColor) &&
+                                        !_controller.isGameOver &&
+                                        bottomRemaining.inMilliseconds == 0,
+                                    flashTint: bottomFlashTint,
+                                    flashDuration: const Duration(
+                                      milliseconds: 700,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        );
+                      }
+
+                      final boardSize = math.min(
+                        constraints.maxWidth,
+                        constraints.maxHeight -
+                            (horizontalBarHeight * 2) -
+                            (edgeGap * 2),
+                      );
+                      if (boardSize <= 0) {
+                        return const SizedBox.shrink();
+                      }
+
+                      return SizedBox(
+                        width: boardSize,
+                        height:
+                            boardSize +
+                            (horizontalBarHeight * 2) +
+                            (edgeGap * 2),
+                        child: Column(
+                          children: [
+                            if (showTimeBars)
                               SizedBox(
-                                width: verticalBarWidth,
+                                height: horizontalBarHeight,
                                 child: CooldownMeter(
                                   label: topColor == 'w' ? 'W' : 'B',
                                   remaining: topRemaining,
@@ -468,15 +623,15 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                       AppAssets.verticalTimeBarAccent,
                                   verticalFallbackAssetPath:
                                       AppAssets.verticalTimeBar,
-                                  orientation: TimeBarOrientation.vertical,
+                                  orientation: TimeBarOrientation.horizontal,
                                   activeColor: topActiveColor,
                                   isPlayerSide: topIsPlayer,
-                                  timeLabel: _controller.isMatchActive
-                                      ? _formatDuration(topRemaining)
-                                      : '--',
+                                  timeLabel: _formatDuration(topRemaining),
                                   readyToFlash:
                                       _controller.isConnected &&
-                                      _controller.isMatchActive &&
+                                      showTimeBars &&
+                                      timerHasStarted &&
+                                      isActiveWindowForColor(topColor) &&
                                       !_controller.isGameOver &&
                                       topRemaining.inMilliseconds == 0,
                                   flashTint: topFlashTint,
@@ -485,11 +640,12 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: boardGap),
-                              buildBoardStack(boardSize),
-                              const SizedBox(width: boardGap),
+                            if (edgeGap > 0) SizedBox(height: edgeGap),
+                            buildBoardStack(boardSize),
+                            if (edgeGap > 0) SizedBox(height: edgeGap),
+                            if (showTimeBars)
                               SizedBox(
-                                width: verticalBarWidth,
+                                height: horizontalBarHeight,
                                 child: CooldownMeter(
                                   label: bottomColor == 'w' ? 'W' : 'B',
                                   remaining: bottomRemaining,
@@ -502,15 +658,15 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                       AppAssets.verticalTimeBarAccent,
                                   verticalFallbackAssetPath:
                                       AppAssets.verticalTimeBar,
-                                  orientation: TimeBarOrientation.vertical,
+                                  orientation: TimeBarOrientation.horizontal,
                                   activeColor: bottomActiveColor,
                                   isPlayerSide: bottomIsPlayer,
-                                  timeLabel: _controller.isMatchActive
-                                      ? _formatDuration(bottomRemaining)
-                                      : '--',
+                                  timeLabel: _formatDuration(bottomRemaining),
                                   readyToFlash:
                                       _controller.isConnected &&
-                                      _controller.isMatchActive &&
+                                      showTimeBars &&
+                                      timerHasStarted &&
+                                      isActiveWindowForColor(bottomColor) &&
                                       !_controller.isGameOver &&
                                       bottomRemaining.inMilliseconds == 0,
                                   flashTint: bottomFlashTint,
@@ -519,178 +675,6 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                                   ),
                                 ),
                               ),
-                            ],
-                          ),
-                        );
-                      }
-
-                      final boardSize = math.min(
-                        constraints.maxWidth,
-                        constraints.maxHeight -
-                            (horizontalBarHeight * 2) -
-                            (boardGap * 2),
-                      );
-                      if (boardSize <= 0) {
-                        return const SizedBox.shrink();
-                      }
-
-                      return SizedBox(
-                        width: boardSize,
-                        height:
-                            boardSize +
-                            (horizontalBarHeight * 2) +
-                            (boardGap * 2),
-                        child: Column(
-                          children: [
-                            SizedBox(
-                              height: horizontalBarHeight,
-                              child: CooldownMeter(
-                                label: topColor == 'w' ? 'W' : 'B',
-                                remaining: topRemaining,
-                                total: _controller.cooldownDuration,
-                                horizontalPrimaryAssetPath:
-                                    AppAssets.horizontalTimeBarAccent,
-                                horizontalFallbackAssetPath:
-                                    AppAssets.horizontalTimeBar,
-                                verticalPrimaryAssetPath:
-                                    AppAssets.verticalTimeBarAccent,
-                                verticalFallbackAssetPath:
-                                    AppAssets.verticalTimeBar,
-                                orientation: TimeBarOrientation.horizontal,
-                                activeColor: topActiveColor,
-                                isPlayerSide: topIsPlayer,
-                                timeLabel: _controller.isMatchActive
-                                    ? _formatDuration(topRemaining)
-                                    : '--',
-                                readyToFlash:
-                                    _controller.isConnected &&
-                                    _controller.isMatchActive &&
-                                    !_controller.isGameOver &&
-                                    topRemaining.inMilliseconds == 0,
-                                flashTint: topFlashTint,
-                                flashDuration: const Duration(
-                                  milliseconds: 700,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: boardGap),
-<<<<<<< HEAD
-                            SizedBox(
-                              width: boardSize,
-                              height: boardSize,
-                              child: Stack(
-                                children: [
-                                  ChessBoardView(
-                                    pieces: _controller.boardPieces,
-                                    playerColor: _controller.playerColor,
-                                    selectedSquare: _controller.selectedSquare,
-                                    legalTargets: _controller.legalTargets,
-                                    lastMoveFrom:
-                                        _controller.playerLastMoveFrom,
-                                    lastMoveTo: _controller.playerLastMoveTo,
-                                    lastMoveHighlightColor: const Color(
-                                      0xFFD7CA64,
-                                    ),
-                                    secondaryMoveFrom:
-                                        _controller.opponentLastMoveFrom,
-                                    secondaryMoveTo:
-                                        _controller.opponentLastMoveTo,
-                                    secondaryMoveHighlightColor: const Color(
-                                      0xFFE57373,
-                                    ),
-                                    queuedMoveFrom: _controller.queuedMoveFrom,
-                                    queuedMoveTo: _controller.queuedMoveTo,
-                                    checkedKingSquares:
-                                        _controller.checkedKingSquares,
-                                    isCheckmate: _isOnlineCheckmate(),
-                                    boardMessage: _onlineBoardMessage(),
-                                    onSquareTap: _controller.tapSquare,
-                                  ),
-                                  if (!_controller.isConnected)
-                                    Positioned.fill(
-                                      child: DecoratedBox(
-                                        decoration: BoxDecoration(
-                                          color: Colors.black.withValues(
-                                            alpha: 0.2,
-                                          ),
-                                        ),
-                                        child: Center(
-                                          child: FilledButton.icon(
-                                            onPressed: canStart
-                                                ? _findMatch
-                                                : null,
-                                            icon: const Icon(
-                                              Icons.groups_2_outlined,
-                                            ),
-                                            label: const Text('Find Match'),
-                                          ),
-                                        ),
-                                      ),
-                                    )
-                                  else if (_controller.isWaitingForOpponent)
-                                    Positioned.fill(
-                                      child: DecoratedBox(
-                                        decoration: BoxDecoration(
-                                          color: Colors.black.withValues(
-                                            alpha: 0.2,
-                                          ),
-                                        ),
-                                        child: const Center(
-                                          child: Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              CircularProgressIndicator(),
-                                              SizedBox(height: 12),
-                                              Text(
-                                                'Waiting for opponent...',
-                                                style: TextStyle(
-                                                  fontWeight: FontWeight.w700,
-                                                  color: Color(0xFF1A1A1A),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-=======
-                            buildBoardStack(boardSize),
->>>>>>> refs/remotes/origin/fixes/requirevalidation
-                            const SizedBox(height: boardGap),
-                            SizedBox(
-                              height: horizontalBarHeight,
-                              child: CooldownMeter(
-                                label: bottomColor == 'w' ? 'W' : 'B',
-                                remaining: bottomRemaining,
-                                total: _controller.cooldownDuration,
-                                horizontalPrimaryAssetPath:
-                                    AppAssets.horizontalTimeBarAccent,
-                                horizontalFallbackAssetPath:
-                                    AppAssets.horizontalTimeBar,
-                                verticalPrimaryAssetPath:
-                                    AppAssets.verticalTimeBarAccent,
-                                verticalFallbackAssetPath:
-                                    AppAssets.verticalTimeBar,
-                                orientation: TimeBarOrientation.horizontal,
-                                activeColor: bottomActiveColor,
-                                isPlayerSide: bottomIsPlayer,
-                                timeLabel: _controller.isMatchActive
-                                    ? _formatDuration(bottomRemaining)
-                                    : '--',
-                                readyToFlash:
-                                    _controller.isConnected &&
-                                    _controller.isMatchActive &&
-                                    !_controller.isGameOver &&
-                                    bottomRemaining.inMilliseconds == 0,
-                                flashTint: bottomFlashTint,
-                                flashDuration: const Duration(
-                                  milliseconds: 700,
-                                ),
-                              ),
-                            ),
                           ],
                         ),
                       );
@@ -738,7 +722,73 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
     return '${halfSecondValue.toStringAsFixed(1)}s';
   }
 
-<<<<<<< HEAD
+  Widget _buildTimingHud({
+    required bool isMatchActive,
+    required bool timerHasStarted,
+    required String? activeWindowColor,
+    required bool isPlayerWindow,
+    required Duration remaining,
+  }) {
+    if (!isMatchActive) {
+      return const SizedBox.shrink();
+    }
+
+    final title = !timerHasStarted
+        ? 'Opening: White moves with no timer'
+        : (activeWindowColor == null
+              ? 'Both sides unlocked'
+              : (isPlayerWindow
+                    ? 'Your timer is running'
+                    : '${activeWindowColor == 'w' ? 'White' : 'Black'} timer is running'));
+    final subtitle = !timerHasStarted
+        ? 'After White moves, Black timer starts.'
+        : (activeWindowColor == null
+              ? 'First mover takes initiative.'
+              : '${_formatDuration(remaining)} remaining');
+    final accent = !timerHasStarted
+        ? const Color(0xFF607D8B)
+        : (isPlayerWindow ? const Color(0xFF2E7D32) : const Color(0xFF546E7A));
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        color: const Color(0xF2FFFFFF),
+        border: Border.all(color: accent.withValues(alpha: 0.45)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        child: Row(
+          children: [
+            Icon(Icons.schedule, size: 18, color: accent),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.black.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   bool _isOnlineCheckmate() {
     final result = _controller.resultCode;
     return result == 'white_wins_checkmate' || result == 'black_wins_checkmate';
@@ -759,7 +809,136 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
       return 'Check';
     }
     return null;
-=======
+  }
+
+  String _onlineVictoryTitle() {
+    final result = _controller.resultCode;
+    if (result == 'white_wins_checkmate') {
+      return 'White Wins';
+    }
+    if (result == 'black_wins_checkmate') {
+      return 'Black Wins';
+    }
+    if (result == 'draw') {
+      return 'Draw';
+    }
+    if (result != null && result.isNotEmpty) {
+      return _humanizeResultCode(result);
+    }
+    final status = _controller.statusText.toLowerCase();
+    if (status.contains('white wins')) {
+      return 'White Wins';
+    }
+    if (status.contains('black wins')) {
+      return 'Black Wins';
+    }
+    if (status.contains('draw')) {
+      return 'Draw';
+    }
+    return 'Game Over';
+  }
+
+  String _onlineVictorySubtitle() {
+    final result = _controller.resultCode;
+    if (result == 'white_wins_checkmate' || result == 'black_wins_checkmate') {
+      return 'Checkmate. Request a new game for a rematch.';
+    }
+    if (result == 'draw') {
+      return 'The match ended in a draw. Request a new game to continue.';
+    }
+    if (result != null && result.isNotEmpty) {
+      return '${_humanizeResultCode(result)}. Request a new game to continue.';
+    }
+    return _controller.statusText;
+  }
+
+  Widget _buildVictoryOverlay({
+    required String title,
+    required String subtitle,
+    required String actionLabel,
+    required VoidCallback onAction,
+  }) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: const Color(0xEE111821),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0x66FFFFFF)),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 16,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.emoji_events_rounded,
+                      color: Color(0xFFFFD26A),
+                      size: 30,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      title,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 20,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      subtitle,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xFFE2E8F0),
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      onPressed: onAction,
+                      icon: const AppAssetIcon(
+                        AppAssets.rematchIcon,
+                        fallbackIcon: Icons.replay,
+                        size: 18,
+                      ),
+                      label: Text(actionLabel),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  static String _humanizeResultCode(String code) {
+    final tokens = code.split('_').where((part) => part.isNotEmpty).toList();
+    if (tokens.isEmpty) {
+      return 'Game Over';
+    }
+    return tokens
+        .map(
+          (token) =>
+              '${token[0].toUpperCase()}${token.length > 1 ? token.substring(1) : ''}',
+        )
+        .join(' ');
+  }
+
   bool _shouldInvertBlackChessPieces({
     required String whiteSkinId,
     required String blackSkinId,
@@ -794,7 +973,6 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
           ),
         )
         .toList(growable: false);
->>>>>>> refs/remotes/origin/fixes/requirevalidation
   }
 
   Future<void> _findMatch() async {

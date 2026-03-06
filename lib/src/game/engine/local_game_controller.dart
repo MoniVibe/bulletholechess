@@ -54,6 +54,8 @@ class LocalGameController extends ChangeNotifier {
   String? _queuedMoveFrom;
   String? _queuedMoveTo;
   String _queuedPromotion = _defaultPromotion;
+  String? _forfeitBlockedColor;
+  String? _forfeitReleaseByColor;
 
   int get version => _version;
   Duration get cooldownDuration => _cooldownDuration;
@@ -63,7 +65,7 @@ class LocalGameController extends ChangeNotifier {
 
   String get turnColor => ChessRules.colorCode(_game.turn);
   String get turnLabel => turnColor == 'w' ? 'White' : 'Black';
-  bool get isGameOver => _winnerColor != null || _game.in_draw;
+  bool get isGameOver => _winnerColor != null;
   String? get winnerColor => _winnerColor;
   String? get winnerLabel {
     if (_winnerColor == null) {
@@ -119,10 +121,6 @@ class LocalGameController extends ChangeNotifier {
     if (_winnerColor != null) {
       return '${winnerLabel!} wins by checkmate. Start a new game.';
     }
-    if (_game.in_draw) {
-      return 'Draw game.';
-    }
-
     if (ChessRules.isInCheckFor(_game, playerColor)) {
       return 'Your king is in check. Play a legal response.';
     }
@@ -135,8 +133,13 @@ class LocalGameController extends ChangeNotifier {
       return 'Queued $queuedMoveLabel. Executing...';
     }
 
-    final playerReady = cooldownRemaining(playerColor).inMilliseconds == 0;
-    final botReady = cooldownRemaining(aiColor).inMilliseconds == 0;
+    _resolveForfeitLockTimeoutIfNeeded();
+    final playerReady =
+        cooldownRemaining(playerColor).inMilliseconds == 0 &&
+        !_isBlockedByForfeitLock(playerColor, resolveTimeout: false);
+    final botReady =
+        cooldownRemaining(aiColor).inMilliseconds == 0 &&
+        !_isBlockedByForfeitLock(aiColor, resolveTimeout: false);
     if (playerReady && botReady) {
       if (ChessRules.isInCheckFor(_game, playerColor)) {
         return 'Both ready. You are in check, move now.';
@@ -151,6 +154,17 @@ class LocalGameController extends ChangeNotifier {
       return ChessRules.isInCheckFor(_game, playerColor)
           ? 'You are in check. Move now.'
           : 'You can move now.';
+    }
+
+    if (_isBlockedByForfeitLock(playerColor)) {
+      final releaseBy = _forfeitReleaseByColor;
+      if (releaseBy != null) {
+        final releaseRemaining = cooldownRemaining(releaseBy);
+        if (releaseRemaining.inMilliseconds > 0) {
+          return 'Overtime turn forfeited. Waiting ${ChessRules.formatDuration(releaseRemaining)}.';
+        }
+      }
+      return 'Overtime turn forfeited. Waiting for opponent.';
     }
 
     final aiRemaining = cooldownRemaining(aiColor);
@@ -233,7 +247,9 @@ class LocalGameController extends ChangeNotifier {
     if (legalNow) {
       final chosenPromotion =
           legalMove['promotion'] as String? ?? _defaultPromotion;
-      final onCooldown = cooldownRemaining(playerColor).inMilliseconds > 0;
+      final onCooldown =
+          cooldownRemaining(playerColor).inMilliseconds > 0 ||
+          _isBlockedByForfeitLock(playerColor);
       if (onCooldown) {
         _queuePlayerMove(from: from, to: square, promotion: chosenPromotion);
         _clearSelection();
@@ -259,7 +275,9 @@ class LocalGameController extends ChangeNotifier {
     }
 
     if (isOwnPiece) {
-      final onCooldown = cooldownRemaining(playerColor).inMilliseconds > 0;
+      final onCooldown =
+          cooldownRemaining(playerColor).inMilliseconds > 0 ||
+          _isBlockedByForfeitLock(playerColor);
       if (onCooldown && _selectedSquare != square) {
         // Allow speculative queueing (e.g. predicted recapture) while cooling down.
         _queuePlayerMove(from: from, to: square, promotion: _defaultPromotion);
@@ -298,6 +316,7 @@ class LocalGameController extends ChangeNotifier {
     if (!_hasActiveGame) {
       return;
     }
+    _resolveForfeitLockTimeoutIfNeeded();
     _refreshTerminalState();
     _tryExecuteQueuedPlayerMove();
     _maybeScheduleAiMove();
@@ -308,8 +327,7 @@ class LocalGameController extends ChangeNotifier {
     if (!_hasActiveGame ||
         _aiMovePending ||
         isGameOver ||
-        cooldownRemaining(aiColor).inMilliseconds > 0 ||
-        !ChessRules.hasAnyLegalMove(_game, aiColor)) {
+        !_canColorMoveNow(aiColor)) {
       return;
     }
 
@@ -322,10 +340,7 @@ class LocalGameController extends ChangeNotifier {
       return;
     }
 
-    if (!_hasActiveGame ||
-        isGameOver ||
-        cooldownRemaining(aiColor).inMilliseconds > 0 ||
-        !ChessRules.hasAnyLegalMove(_game, aiColor)) {
+    if (!_hasActiveGame || isGameOver || !_canColorMoveNow(aiColor)) {
       _aiMovePending = false;
       notifyListeners();
       return;
@@ -371,6 +386,7 @@ class LocalGameController extends ChangeNotifier {
     final now = DateTime.now();
     _whiteReadyAt = now;
     _blackReadyAt = now;
+    _clearForfeitLock();
     _refreshTerminalState();
   }
 
@@ -382,10 +398,12 @@ class LocalGameController extends ChangeNotifier {
   }) {
     if (!_hasActiveGame ||
         isGameOver ||
-        cooldownRemaining(moverColor).inMilliseconds > 0) {
+        cooldownRemaining(moverColor).inMilliseconds > 0 ||
+        _isBlockedByForfeitLock(moverColor)) {
       return false;
     }
 
+    final nominalTurnColor = turnColor;
     final legalMove = ChessRules.findValidatedLegalMove(
       game: _game,
       from: from,
@@ -421,6 +439,10 @@ class LocalGameController extends ChangeNotifier {
       _opponentLastMoveTo = to;
     }
     _setCooldownForMover(moverColor);
+    _updateForfeitLockAfterMove(
+      moverColor: moverColor,
+      nominalTurnColor: nominalTurnColor,
+    );
     _refreshSelectionForCurrentBoard();
     _refreshTerminalState();
     return true;
@@ -430,12 +452,10 @@ class LocalGameController extends ChangeNotifier {
     final now = DateTime.now();
     if (mover == 'w') {
       _whiteReadyAt = now.add(_cooldownDuration);
-      _blackReadyAt = now;
       return;
     }
 
     _blackReadyAt = now.add(_cooldownDuration);
-    _whiteReadyAt = now;
   }
 
   void _clearSelection() {
@@ -461,6 +481,10 @@ class LocalGameController extends ChangeNotifier {
 
   void _tryExecuteQueuedPlayerMove() {
     if (!_hasActiveGame || !hasQueuedMove || isGameOver) {
+      return;
+    }
+    _resolveForfeitLockTimeoutIfNeeded();
+    if (_isBlockedByForfeitLock(playerColor, resolveTimeout: false)) {
       return;
     }
     if (cooldownRemaining(playerColor).inMilliseconds > 0) {
@@ -498,6 +522,63 @@ class LocalGameController extends ChangeNotifier {
     _clearQueuedMove();
     _feedback = null;
     _maybeScheduleAiMove();
+  }
+
+  bool _canColorMoveNow(String color) {
+    if (cooldownRemaining(color).inMilliseconds > 0) {
+      return false;
+    }
+    if (_isBlockedByForfeitLock(color)) {
+      return false;
+    }
+    return ChessRules.hasAnyLegalMove(_game, color);
+  }
+
+  void _updateForfeitLockAfterMove({
+    required String moverColor,
+    required String nominalTurnColor,
+  }) {
+    if (_forfeitBlockedColor == nominalTurnColor &&
+        _forfeitReleaseByColor == moverColor) {
+      _clearForfeitLock();
+      return;
+    }
+    if (moverColor != nominalTurnColor) {
+      _forfeitBlockedColor = nominalTurnColor;
+      _forfeitReleaseByColor = moverColor;
+      return;
+    }
+    if (_forfeitReleaseByColor == moverColor && _forfeitBlockedColor != null) {
+      _clearForfeitLock();
+    }
+  }
+
+  bool _isBlockedByForfeitLock(String color, {bool resolveTimeout = true}) {
+    if (_forfeitBlockedColor != color) {
+      return false;
+    }
+    if (resolveTimeout) {
+      _resolveForfeitLockTimeoutIfNeeded();
+      if (_forfeitBlockedColor != color) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void _resolveForfeitLockTimeoutIfNeeded() {
+    final releaseBy = _forfeitReleaseByColor;
+    if (releaseBy == null) {
+      return;
+    }
+    if (cooldownRemaining(releaseBy).inMilliseconds <= 0) {
+      _clearForfeitLock();
+    }
+  }
+
+  void _clearForfeitLock() {
+    _forfeitBlockedColor = null;
+    _forfeitReleaseByColor = null;
   }
 
   void _refreshSelectionForCurrentBoard() {

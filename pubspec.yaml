@@ -37,7 +37,9 @@ dependencies:
   chess: ^0.8.1
   http: ^1.2.2
   bullethole_shared:
-    path: ../bullethole-shared
+    git:
+      url: https://github.com/meshik/pureflutter.git
+      ref: 9bb18051bace6d271c0bfadaf88ea511f6de7e9a
 
 dev_dependencies:
   flutter_test:

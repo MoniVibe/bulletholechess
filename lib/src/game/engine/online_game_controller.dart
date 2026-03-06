@@ -73,6 +73,8 @@ class OnlineGameController extends ChangeNotifier {
   String? _matchId;
   String? _myColor;
   String _status = 'disconnected';
+  String? _forfeitBlockedColor;
+  String? _forfeitReleaseByColor;
   String? _whitePlayerName;
   String? _blackPlayerName;
   String? _result;
@@ -130,6 +132,9 @@ class OnlineGameController extends ChangeNotifier {
   bool get canPlayerInteract {
     final color = _myColor;
     if (!isConnected || _status != 'active' || color == null || isGameOver) {
+      return false;
+    }
+    if (_isBlockedByForfeitLock(color, resolveTimeout: false)) {
       return false;
     }
     return ChessRules.hasAnyLegalMove(_game, color);
@@ -226,6 +231,17 @@ class OnlineGameController extends ChangeNotifier {
     final myRemaining = cooldownRemaining(color);
     if (myRemaining.inMilliseconds > 0) {
       return 'Cooling down (${ChessRules.formatDuration(myRemaining)}).';
+    }
+
+    if (_isBlockedByForfeitLock(color)) {
+      final releaseBy = _forfeitReleaseByColor;
+      if (releaseBy != null) {
+        final releaseRemaining = cooldownRemaining(releaseBy);
+        if (releaseRemaining.inMilliseconds > 0) {
+          return 'Overtime turn forfeited. Waiting ${ChessRules.formatDuration(releaseRemaining)}.';
+        }
+      }
+      return 'Overtime turn forfeited. Waiting for opponent.';
     }
 
     return 'You can move now.';
@@ -501,6 +517,7 @@ class OnlineGameController extends ChangeNotifier {
     final now = DateTime.now().millisecondsSinceEpoch;
     _whiteReadyAtMs = now;
     _blackReadyAtMs = now;
+    _clearForfeitLock();
     _feedback = null;
     if (notify) {
       notifyListeners();
@@ -737,6 +754,7 @@ class OnlineGameController extends ChangeNotifier {
     if (_disposed || !isConnected) {
       return;
     }
+    _resolveForfeitLockTimeoutIfNeeded();
 
     if (_status == 'active') {
       _tryExecuteQueuedPlayerMove();
@@ -754,7 +772,8 @@ class OnlineGameController extends ChangeNotifier {
     required String source,
     int? queueToken,
   }) {
-    if (!isConnected || _status != 'active' || _moveInFlight) {
+    final color = _myColor;
+    if (!isConnected || _status != 'active' || _moveInFlight || color == null) {
       _logEvent(
         'send_move_blocked',
         details: <String, Object?>{
@@ -763,6 +782,20 @@ class OnlineGameController extends ChangeNotifier {
           'status': _status,
           'isConnected': isConnected,
           'moveInFlight': _moveInFlight,
+          'color': color,
+        },
+      );
+      return false;
+    }
+    if (_isBlockedByForfeitLock(color)) {
+      _logEvent(
+        'send_move_blocked',
+        details: <String, Object?>{
+          'from': from,
+          'to': to,
+          'reason': 'forfeit_lock',
+          'blockedColor': _forfeitBlockedColor,
+          'releaseByColor': _forfeitReleaseByColor,
         },
       );
       return false;
@@ -847,6 +880,10 @@ class OnlineGameController extends ChangeNotifier {
   void _tryExecuteQueuedPlayerMove() {
     final color = _myColor;
     if (color == null || !hasQueuedMove || isGameOver || _moveInFlight) {
+      return;
+    }
+    _resolveForfeitLockTimeoutIfNeeded();
+    if (_isBlockedByForfeitLock(color, resolveTimeout: false)) {
       return;
     }
     if (cooldownRemaining(color).inMilliseconds > 0) {
@@ -1046,6 +1083,7 @@ class OnlineGameController extends ChangeNotifier {
         if (serverNow != null) {
           _clockOffsetMs = serverNow - DateTime.now().millisecondsSinceEpoch;
         }
+        _applyForfeitLockFromPayload(map);
 
         _feedback = null;
         _logEvent(
@@ -1082,6 +1120,7 @@ class OnlineGameController extends ChangeNotifier {
         if (serverNow != null) {
           _clockOffsetMs = serverNow - DateTime.now().millisecondsSinceEpoch;
         }
+        _applyForfeitLockFromPayload(map);
 
         var receivedCooldownSnapshot = false;
         final cooldownEndsAt = map['cooldownEndsAt'];
@@ -1196,6 +1235,7 @@ class OnlineGameController extends ChangeNotifier {
 
     _status = state['status'] as String? ?? _status;
     _result = state['result'] as String?;
+    _applyForfeitLockFromPayload(state);
 
     final players = state['players'];
     if (players is Map<String, dynamic>) {
@@ -1316,11 +1356,9 @@ class OnlineGameController extends ChangeNotifier {
     final nextReady = atMs + _cooldownDuration.inMilliseconds;
     if (moverColor == 'w') {
       _whiteReadyAtMs = nextReady;
-      _blackReadyAtMs = atMs;
       return;
     }
     _blackReadyAtMs = nextReady;
-    _whiteReadyAtMs = atMs;
   }
 
   void _setReadyAtForColor(String color, int readyAtMs) {
@@ -1364,10 +1402,69 @@ class OnlineGameController extends ChangeNotifier {
   }
 
   bool _isRetriableQueueError(String? code, String message) {
-    if (code == 'cooldown_active') {
+    if (code == 'cooldown_active' || code == 'forfeit_waiting_release') {
       return true;
     }
-    return message.toLowerCase().contains('cooldown');
+    final lowered = message.toLowerCase();
+    return lowered.contains('cooldown') || lowered.contains('forfeit');
+  }
+
+  bool _isBlockedByForfeitLock(String color, {bool resolveTimeout = true}) {
+    if (_forfeitBlockedColor != color) {
+      return false;
+    }
+    if (resolveTimeout) {
+      _resolveForfeitLockTimeoutIfNeeded();
+      if (_forfeitBlockedColor != color) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void _resolveForfeitLockTimeoutIfNeeded() {
+    final releaseBy = _forfeitReleaseByColor;
+    if (releaseBy == null) {
+      return;
+    }
+    if (cooldownRemaining(releaseBy).inMilliseconds <= 0) {
+      _clearForfeitLock();
+    }
+  }
+
+  void _applyForfeitLockFromPayload(Map<String, dynamic> payload) {
+    final rawLock = payload['forfeitLock'];
+    if (rawLock is! Map) {
+      _clearForfeitLock();
+      return;
+    }
+
+    final lock = Map<String, dynamic>.from(rawLock);
+    final blockedColor = _normalizeColor(lock['blockedColor']);
+    final releaseByColor = _normalizeColor(lock['releaseByColor']);
+    if (blockedColor == null || releaseByColor == null) {
+      _clearForfeitLock();
+      return;
+    }
+
+    _forfeitBlockedColor = blockedColor;
+    _forfeitReleaseByColor = releaseByColor;
+  }
+
+  void _clearForfeitLock() {
+    _forfeitBlockedColor = null;
+    _forfeitReleaseByColor = null;
+  }
+
+  String? _normalizeColor(Object? raw) {
+    if (raw is! String) {
+      return null;
+    }
+    final normalized = raw.trim().toLowerCase();
+    if (normalized == 'w' || normalized == 'b') {
+      return normalized;
+    }
+    return null;
   }
 
   void _logEvent(

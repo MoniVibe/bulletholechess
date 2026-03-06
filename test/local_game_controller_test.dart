@@ -54,6 +54,41 @@ void main() {
     expect(controller.boardPieces.containsKey('d2'), isFalse);
   });
 
+  test(
+    'timed-out side is locked after opponent steals turn until release timeout',
+    () async {
+      final controller = LocalGameController(
+        initialCooldownDuration: const Duration(milliseconds: 250),
+        aiThinkDelayMin: const Duration(milliseconds: 10),
+        aiThinkDelayMax: const Duration(milliseconds: 10),
+        aiEngine: _ScriptedAiEngine(<EngineMove>[
+          const EngineMove(from: 'e7', to: 'e5'),
+          const EngineMove(from: 'd7', to: 'd5'),
+        ]),
+      );
+      addTearDown(controller.dispose);
+
+      controller.startNewGame(playerAsWhite: true);
+
+      controller.tapSquare('e2');
+      controller.tapSquare('e4');
+      await _waitUntil(() => controller.boardPieces['e5'] == 'p');
+      await _waitUntil(() => controller.boardPieces['d5'] == 'p');
+
+      expect(controller.cooldownRemaining('w').inMilliseconds, equals(0));
+      expect(controller.statusText, contains('Overtime turn forfeited'));
+
+      controller.tapSquare('d2');
+      controller.tapSquare('d4');
+      expect(controller.hasQueuedMove, isTrue);
+      expect(controller.boardPieces.containsKey('d4'), isFalse);
+
+      await _waitUntil(() => controller.boardPieces['d4'] == 'P');
+      expect(controller.hasQueuedMove, isFalse);
+      expect(controller.boardPieces.containsKey('d2'), isFalse);
+    },
+  );
+
   test('player can still move legally while in check', () async {
     final controller = LocalGameController(
       initialCooldownDuration: Duration.zero,
