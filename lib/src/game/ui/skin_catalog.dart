@@ -84,7 +84,7 @@ class SkinCatalog {
       ];
 
   static String get defaultChessBoardSkinId => chessBoardSashite.id;
-  static String get defaultChessPieceSkinId => chessPiecesSashite.id;
+  static String get defaultChessPieceSkinId => chessPiecesClassic.id;
 
   static ChessBoardSkinOption chessBoardById(String id) {
     return chessBoardSkins.firstWhere(
@@ -96,7 +96,7 @@ class SkinCatalog {
   static ChessPieceSkinOption chessPieceById(String id) {
     return chessPieceSkins.firstWhere(
       (skin) => skin.id == id,
-      orElse: () => chessPiecesSashite,
+      orElse: () => chessPiecesClassic,
     );
   }
 }
