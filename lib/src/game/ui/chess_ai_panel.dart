@@ -263,6 +263,7 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
+                        key: const ValueKey<String>('chess_ai_new_game'),
                         onPressed: () {
                           _controller.startNewGame(
                             playerAsWhite: _playerAsWhite,
@@ -801,6 +802,7 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
       ),
       child: Center(
         child: FilledButton.icon(
+          key: const ValueKey<String>('chess_ai_start_new_game'),
           onPressed: onStart,
           icon: const AppAssetIcon(
             AppAssets.newGameIcon,

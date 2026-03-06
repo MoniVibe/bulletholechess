@@ -139,6 +139,31 @@ Telemetry is written as JSONL under `debug/`.
 
 Full two-machine checklist: `docs/multiplayer_smoke_lab.md`.
 
+### UI-vs-UI bot smoke (screen tap automation)
+
+Run a UI bot that taps the same controls/squares a human uses:
+
+```powershell
+.\run-ui-bot-smoke.ps1
+```
+
+Online two-machine smoke (run one instance per machine, same backend URL):
+
+```powershell
+.\run-ui-bot-smoke.ps1 -Online -BackendUrl http://<server-ip>:8080 -Name ChessUiBot-A -Moves 20
+```
+
+Useful args:
+- `-Moves` max move attempts
+- `-MaxSeconds` total test budget
+- `-IdleSeconds` fail budget when no move can be made
+
+Direct Flutter command:
+
+```powershell
+flutter test integration_test/chess_ui_bot_smoke_test.dart -d windows --dart-define=UI_BOT_ONLINE=1 --dart-define=BOT_BACKEND_URL=http://<server-ip>:8080 --dart-define=BOT_NAME=ChessUiBot-A
+```
+
 ## Flutter Side-Project CI Clone
 
 This repo now includes a dedicated Flutter-only CI lane that is separate from Azure deploy workflows:
