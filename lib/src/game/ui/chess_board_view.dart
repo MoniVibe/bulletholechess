@@ -65,8 +65,10 @@ class ChessBoardView extends StatelessWidget {
   final ValueChanged<String> onSquareTap;
 
   static const String _files = 'abcdefgh';
-  static const double _legacyPieceVisualScale = 1.36;
+  static const double _legacyPieceVisualScale = 1.26;
   static const double _legacyPieceVisualYOffset = -0.04;
+  static const double _pieceLiftPixels = 3.5;
+  static const double _pieceHeightBoostPixels = 2.0;
   static const TextStyle _pieceFallbackStyle = TextStyle(
     fontSize: 30,
     fontWeight: FontWeight.w700,
@@ -167,6 +169,7 @@ class ChessBoardView extends StatelessWidget {
                             0xFF00BCD4,
                           ).withValues(alpha: 0.14),
                           child: Stack(
+                            clipBehavior: Clip.none,
                             children: <Widget>[
                               if (isSelected)
                                 Positioned.fill(
@@ -269,17 +272,25 @@ class ChessBoardView extends StatelessWidget {
                                           : blackPieceYOffset;
                                       final pieceSize =
                                           squareSize *
-                                          pieceScale.clamp(0.5, 2.2);
-                                      return Center(
-                                        child: Transform.translate(
-                                          offset: Offset(
-                                            0,
-                                            squareSize *
-                                                pieceYOffset.clamp(-0.4, 0.4),
-                                          ),
+                                          pieceScale.clamp(0.5, 1.5);
+                                      return Transform.translate(
+                                        offset: Offset(
+                                          0,
+                                          squareSize *
+                                                  pieceYOffset.clamp(-0.4, 0.4) -
+                                              _pieceLiftPixels,
+                                        ),
+                                        child: OverflowBox(
+                                          alignment: Alignment.center,
+                                          minWidth: 0,
+                                          minHeight: 0,
+                                          maxWidth: pieceSize,
+                                          maxHeight:
+                                              pieceSize + _pieceHeightBoostPixels,
                                           child: SizedBox(
                                             width: pieceSize,
-                                            height: pieceSize,
+                                            height:
+                                                pieceSize + _pieceHeightBoostPixels,
                                             child: _buildPieceSprite(piece),
                                           ),
                                         ),

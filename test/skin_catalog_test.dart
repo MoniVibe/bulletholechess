@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('chess board catalog exposes expected ids', () {
     final ids = SkinCatalog.chessBoardSkins.map((skin) => skin.id).toSet();
-    expect(ids, containsAll(<String>{'chess_pearl', 'chess_red'}));
+    expect(ids, containsAll(<String>{'chess_sashite', 'chess_pearl'}));
   });
 
   test('chess piece catalog exposes expected ids', () {

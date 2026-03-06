@@ -24,22 +24,14 @@ class SkinCatalog {
     playableSizeRatio: AppAssets.chessBoardPlayableSizeRatio,
   );
 
-  static const ChessBoardSkinOption chessBoardRed = ChessBoardSkinOption(
-    id: 'chess_red',
-    label: 'Red Board',
-    assetPath: AppAssets.chessBoardRed,
-    playableInsetRatio: AppAssets.chessBoardPlayableInsetRatio,
-    playableSizeRatio: AppAssets.chessBoardPlayableSizeRatio,
-  );
-
   static const List<ChessBoardSkinOption> chessBoardSkins =
-      <ChessBoardSkinOption>[chessBoardSashite, chessBoardPearl, chessBoardRed];
+      <ChessBoardSkinOption>[chessBoardSashite, chessBoardPearl];
 
   static const ChessPieceSkinOption chessPiecesSashite = ChessPieceSkinOption(
     id: 'chess_sashite_western',
     label: 'Sashite Western (CC0)',
     spriteMap: AppAssets.sashitePieceSprites,
-    pieceScale: 0.98,
+    pieceScale: 1.26,
     pieceYOffset: 0,
   );
 
@@ -47,7 +39,7 @@ class SkinCatalog {
     id: 'chess_classic',
     label: 'Classic Pieces',
     spriteMap: AppAssets.classicPieceSprites,
-    pieceScale: 1.36,
+    pieceScale: 1.26,
     pieceYOffset: -0.04,
   );
 
@@ -55,7 +47,7 @@ class SkinCatalog {
     id: 'chess_red_pieces',
     label: 'Ruby Pieces',
     spriteMap: AppAssets.redPieceSprites,
-    pieceScale: 1.36,
+    pieceScale: 1.26,
     pieceYOffset: -0.04,
   );
 
@@ -63,7 +55,7 @@ class SkinCatalog {
     id: 'chess_neon',
     label: 'Neon Glow',
     spriteMap: AppAssets.classicPieceSprites,
-    pieceScale: 1.36,
+    pieceScale: 1.26,
     pieceYOffset: -0.04,
     tintColor: Color(0xFF00E5FF),
     isPremium: true,
@@ -73,7 +65,7 @@ class SkinCatalog {
     id: 'chess_bronze',
     label: 'Bronze Tone',
     spriteMap: AppAssets.classicPieceSprites,
-    pieceScale: 1.36,
+    pieceScale: 1.26,
     pieceYOffset: -0.04,
     tintColor: Color(0xFFE6A23C),
     isPremium: true,
