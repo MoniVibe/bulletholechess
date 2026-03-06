@@ -36,9 +36,11 @@ packages:
   bullethole_shared:
     dependency: "direct main"
     description:
-      path: "../bullethole-shared"
-      relative: true
-    source: path
+      path: "."
+      ref: af19e184c6b4f3fc8ba6714b00000ee64bd8b232
+      resolved-ref: af19e184c6b4f3fc8ba6714b00000ee64bd8b232
+      url: "https://github.com/meshik/pureflutter.git"
+    source: git
     version: "0.1.0"
   characters:
     dependency: transitive

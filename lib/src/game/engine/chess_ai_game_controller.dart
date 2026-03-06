@@ -21,10 +21,6 @@ class ChessAiGameController extends ChangeNotifier {
       const Duration(milliseconds: 200),
       (_) => _onTick(),
     );
-    startNewGame(
-      playerAsWhite: true,
-      cooldownDuration: initialCooldownDuration,
-    );
   }
 
   final Duration aiMoveDelay;
@@ -35,6 +31,7 @@ class ChessAiGameController extends ChangeNotifier {
   Timer? _aiMoveTimer;
   bool _disposed = false;
   bool _aiThinking = false;
+  bool _hasActiveGame = false;
 
   Duration _cooldownDuration;
   int _whiteReadyAtMs = 0;
@@ -56,7 +53,17 @@ class ChessAiGameController extends ChangeNotifier {
   String get aiColor => ChessRules.oppositeColor(_playerColor);
   String get turnColor => ChessRules.colorCode(_game.turn);
   Duration get cooldownDuration => _cooldownDuration;
+  bool get hasActiveGame => _hasActiveGame;
   bool get isGameOver => _game.game_over;
+  bool get isCheckmate => _game.in_checkmate;
+  bool get isDraw => _game.in_draw;
+  String? get winnerLabel {
+    if (!isCheckmate) {
+      return null;
+    }
+    return turnColor == 'w' ? 'Black' : 'White';
+  }
+
   bool get aiThinking => _aiThinking;
   String? get selectedSquare => _selectedSquare;
   Set<String> get legalTargets => _legalTargets;
@@ -80,6 +87,9 @@ class ChessAiGameController extends ChangeNotifier {
   List<String> get history => _game.getHistory().cast<String>();
 
   Duration cooldownRemaining(String color) {
+    if (!_hasActiveGame || isGameOver) {
+      return Duration.zero;
+    }
     final now = _estimatedNowMs();
     final readyAt = color == 'w' ? _whiteReadyAtMs : _blackReadyAtMs;
     final remaining = readyAt - now;
@@ -94,6 +104,9 @@ class ChessAiGameController extends ChangeNotifier {
   }
 
   String get statusText {
+    if (!_hasActiveGame) {
+      return 'Start a new game to begin.';
+    }
     if (isGameOver) {
       if (_game.in_checkmate) {
         final winner = turnColor == 'w' ? 'Black' : 'White';
@@ -111,20 +124,33 @@ class ChessAiGameController extends ChangeNotifier {
       }
       return 'Queued $queuedMoveLabel. Executing...';
     }
-    if (remaining.inMilliseconds > 0) {
-      return 'Cooling down (${ChessRules.formatDuration(remaining)}).';
+    final whiteCooldown = cooldownRemaining('w');
+    final blackCooldown = cooldownRemaining('b');
+    String? activeWindowColor;
+    Duration activeWindowRemaining = Duration.zero;
+    if (whiteCooldown.inMilliseconds > 0 && blackCooldown.inMilliseconds <= 0) {
+      activeWindowColor = 'b';
+      activeWindowRemaining = whiteCooldown;
+    } else if (blackCooldown.inMilliseconds > 0 &&
+        whiteCooldown.inMilliseconds <= 0) {
+      activeWindowColor = 'w';
+      activeWindowRemaining = blackCooldown;
     }
-    if (ChessRules.hasAnyLegalMove(_game, _playerColor)) {
-      return _aiThinking ? 'Your move. AI is planning...' : 'Your move.';
+
+    if (activeWindowColor != null) {
+      final isPlayerWindow = activeWindowColor == _playerColor;
+      final sideLabel = activeWindowColor == 'w' ? 'White' : 'Black';
+      final formatted = ChessRules.formatDuration(activeWindowRemaining);
+      if (isPlayerWindow) {
+        return 'Your timer is running ($formatted). Move now.';
+      }
+      return '$sideLabel timer is running ($formatted). Waiting.';
     }
-    final aiRemaining = cooldownRemaining(aiColor);
-    if (aiRemaining.inMilliseconds > 0) {
-      return 'AI cooling down (${ChessRules.formatDuration(aiRemaining)}).';
-    }
+
     if (_aiThinking) {
-      return 'AI is thinking...';
+      return 'Both sides unlocked. AI is planning.';
     }
-    return 'Waiting for legal moves.';
+    return 'Both sides unlocked. First move takes initiative.';
   }
 
   void startNewGame({required bool playerAsWhite, Duration? cooldownDuration}) {
@@ -133,6 +159,7 @@ class ChessAiGameController extends ChangeNotifier {
       _cooldownDuration = cooldownDuration;
     }
     _game.reset();
+    _hasActiveGame = true;
     _playerColor = playerAsWhite ? 'w' : 'b';
     _aiThinking = false;
     _feedback = null;
@@ -150,6 +177,9 @@ class ChessAiGameController extends ChangeNotifier {
   }
 
   void tapSquare(String square) {
+    if (!_hasActiveGame) {
+      return;
+    }
     final canQueuePlannedMove =
         !isGameOver && cooldownRemaining(_playerColor).inMilliseconds > 0;
     final canHandleTap = canPlayerInteract || canQueuePlannedMove;
@@ -260,7 +290,7 @@ class ChessAiGameController extends ChangeNotifier {
   }
 
   void _scheduleAiMoveIfNeeded() {
-    if (_disposed || isGameOver) {
+    if (_disposed || !_hasActiveGame || isGameOver) {
       return;
     }
     if (_aiThinking || _aiMoveTimer != null) {
@@ -341,15 +371,13 @@ class ChessAiGameController extends ChangeNotifier {
     final readyAt = now + _cooldownDuration.inMilliseconds;
     if (color == 'w') {
       _whiteReadyAtMs = readyAt;
-      _blackReadyAtMs = now;
     } else {
       _blackReadyAtMs = readyAt;
-      _whiteReadyAtMs = now;
     }
   }
 
   void _onTick() {
-    if (_disposed) {
+    if (_disposed || !_hasActiveGame) {
       return;
     }
 
@@ -366,7 +394,7 @@ class ChessAiGameController extends ChangeNotifier {
   }
 
   bool _tryExecuteQueuedMoveIfReady() {
-    if (_disposed || !hasQueuedMove || isGameOver) {
+    if (_disposed || !_hasActiveGame || !hasQueuedMove || isGameOver) {
       return false;
     }
     if (cooldownRemaining(_playerColor).inMilliseconds > 0) {
@@ -401,7 +429,7 @@ class ChessAiGameController extends ChangeNotifier {
   }
 
   bool _canColorMoveNow(String color) {
-    if (isGameOver) {
+    if (!_hasActiveGame || isGameOver) {
       return false;
     }
     return cooldownRemaining(color).inMilliseconds <= 0 &&

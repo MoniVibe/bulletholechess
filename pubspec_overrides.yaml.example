@@ -1,0 +1,3 @@
+dependency_overrides:
+  bullethole_shared:
+    path: ../bullethole-shared

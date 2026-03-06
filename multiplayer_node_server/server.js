@@ -12,9 +12,14 @@ const DEFAULT_COOLDOWN_SECONDS = Number.parseInt(
   process.env.DEFAULT_COOLDOWN_SECONDS || '3',
   10,
 );
-const MIN_COOLDOWN_SECONDS = 1;
+const MIN_COOLDOWN_SECONDS = Number.parseInt(
+  process.env.MIN_COOLDOWN_SECONDS || '1',
+  10,
+);
 const MAX_COOLDOWN_SECONDS = 30;
 const DEFAULT_PIECE_SKIN_ID = 'chess_classic';
+const DEFAULT_GAME_TYPE = 'chess';
+const GAME_TYPE_CHESS = 'chess';
 const MAX_PIECE_SKIN_ID_LENGTH = 40;
 const PIECE_SKIN_ID_PATTERN = /^[a-z0-9_-]+$/;
 const MATCH_TTL_MS = Number.parseInt(process.env.MATCH_TTL_MS || '0', 10);
@@ -145,6 +150,7 @@ wss.on('connection', (socket, req) => {
   match.updatedAt = Date.now();
   logEvent('ws_connected', {
     matchId,
+    gameType: match.gameType,
     playerId,
     color,
     players: {
@@ -156,10 +162,12 @@ wss.on('connection', (socket, req) => {
   sendJson(socket, {
     type: 'welcome',
     matchId,
+    gameType: match.gameType,
     playerId,
     color,
     pieceSkinId: player.pieceSkinId ?? DEFAULT_PIECE_SKIN_ID,
     cooldownSeconds: Math.round(match.cooldownMs / 1000),
+    forfeitLock: serializeForfeitLock(match.forfeitLock),
     serverNow: Date.now(),
   });
   broadcastState(match);
@@ -199,10 +207,15 @@ wss.on('connection', (socket, req) => {
     player.socket = null;
     match.playersById.delete(playerId);
     clearColorSlot(match, color);
-    match.game = new Chess();
+    if (match.gameType === GAME_TYPE_CHESS) {
+      match.game = new Chess();
+    } else {
+      match.relayState = null;
+    }
     const now = Date.now();
     match.cooldownEndsAt.w = now;
     match.cooldownEndsAt.b = now;
+    clearForfeitLock(match);
     match.updatedAt = now;
 
     if (!match.players.white && !match.players.black) {
@@ -252,12 +265,14 @@ function joinOrCreate(req, res) {
   const requestedCooldownSeconds = sanitizeCooldownSeconds(
     req.body?.cooldownSeconds,
   );
+  const gameType = sanitizeGameType(req.body?.gameType) ?? DEFAULT_GAME_TYPE;
   const requestedPieceSkinId =
     sanitizePieceSkinId(req.body?.pieceSkinId) ?? DEFAULT_PIECE_SKIN_ID;
 
   pruneExpiredMatches();
   const assignment = assignPlayerToMatch(
     name,
+    gameType,
     requestedCooldownSeconds,
     requestedPieceSkinId,
   );
@@ -266,6 +281,7 @@ function joinOrCreate(req, res) {
     playerId: assignment.playerId,
     color: assignment.color,
     created: assignment.created,
+    gameType: assignment.match.gameType,
     cooldownSeconds: Math.round(assignment.match.cooldownMs / 1000),
     pieceSkinId: requestedPieceSkinId,
     playerName: name,
@@ -275,14 +291,20 @@ function joinOrCreate(req, res) {
     matchId: assignment.match.matchId,
     playerId: assignment.playerId,
     color: assignment.color,
+    gameType: assignment.match.gameType,
     wsPath: '/ws',
     cooldownSeconds: Math.round(assignment.match.cooldownMs / 1000),
     pieceSkinId: requestedPieceSkinId,
   });
 }
 
-function assignPlayerToMatch(name, requestedCooldownSeconds, pieceSkinId) {
-  const waitingMatch = findJoinableMatch();
+function assignPlayerToMatch(
+  name,
+  gameType,
+  requestedCooldownSeconds,
+  pieceSkinId,
+) {
+  const waitingMatch = findJoinableMatch(gameType);
   if (waitingMatch) {
     const color = openColorForMatch(waitingMatch);
     const playerId = crypto.randomUUID();
@@ -306,7 +328,7 @@ function assignPlayerToMatch(name, requestedCooldownSeconds, pieceSkinId) {
 
   const matchId = crypto.randomUUID();
   const playerId = crypto.randomUUID();
-  const match = createEmptyMatch({ matchId, cooldownMs });
+  const match = createEmptyMatch({ matchId, cooldownMs, gameType });
   match.players.white = { playerId, name, socket: null, pieceSkinId };
   match.playersById.set(playerId, 'w');
   matches.set(matchId, match);
@@ -318,10 +340,13 @@ function assignPlayerToMatch(name, requestedCooldownSeconds, pieceSkinId) {
   };
 }
 
-function findJoinableMatch() {
+function findJoinableMatch(gameType) {
   let candidate = null;
   for (const match of matches.values()) {
     if (isExpired(match)) {
+      continue;
+    }
+    if (match.gameType !== gameType) {
       continue;
     }
     if (!openColorForMatch(match)) {
@@ -365,6 +390,11 @@ function clearColorSlot(match, color) {
 }
 
 function handleSocketMessage({ match, color, socket, payload }) {
+  if (match.gameType !== GAME_TYPE_CHESS) {
+    handleRelaySocketMessage({ match, color, socket, payload });
+    return;
+  }
+
   const type = typeof payload.type === 'string' ? payload.type : '';
   switch (type) {
     case 'move': {
@@ -416,6 +446,35 @@ function handleSocketMessage({ match, color, socket, payload }) {
       }
 
       const now = Date.now();
+      maybeResolveForfeitLockTimeout(match, now);
+      if (isColorBlockedByForfeitLock(match, color)) {
+        const releaseByColor = match.forfeitLock.releaseByColor;
+        const releaseReadyAt = releaseByColor
+          ? match.cooldownEndsAt[releaseByColor] || 0
+          : 0;
+        const remainingMs = Math.max(0, releaseReadyAt - now);
+        logEvent('move_rejected', {
+          matchId: match.matchId,
+          color,
+          playerId,
+          reason: 'forfeit_waiting_release',
+          blockedColor: match.forfeitLock.blockedColor,
+          releaseByColor,
+          remainingMs,
+        });
+        sendJson(socket, {
+          type: 'error',
+          message: 'You forfeited the overdue turn. Wait for the opponent move or timeout.',
+          code: 'forfeit_waiting_release',
+          blockedColor: match.forfeitLock.blockedColor,
+          releaseByColor,
+          remainingMs,
+          cooldownEndsAt: match.cooldownEndsAt,
+          forfeitLock: serializeForfeitLock(match.forfeitLock),
+          serverNow: now,
+        });
+        return;
+      }
       const readyAt = match.cooldownEndsAt[color] || 0;
       if (now < readyAt) {
         logEvent('move_rejected', {
@@ -556,6 +615,7 @@ function handleSocketMessage({ match, color, socket, payload }) {
         return;
       }
 
+      const nominalTurnColor = match.game.turn();
       const movePayload = movePayloadFromLegalMove(legalMove);
       const moved = withColorTurn(match.game, color, () =>
         match.game.move(movePayload),
@@ -578,6 +638,22 @@ function handleSocketMessage({ match, color, socket, payload }) {
       }
 
       setCooldownForMover(match, color, now);
+      if (
+        match.forfeitLock.blockedColor === nominalTurnColor &&
+        match.forfeitLock.releaseByColor === color
+      ) {
+        clearForfeitLock(match);
+      } else if (nominalTurnColor !== color) {
+        setForfeitLock(match, {
+          blockedColor: nominalTurnColor,
+          releaseByColor: color,
+        });
+      } else if (
+        match.forfeitLock.releaseByColor === color &&
+        match.forfeitLock.blockedColor
+      ) {
+        clearForfeitLock(match);
+      }
       match.updatedAt = now;
       logEvent('move_accepted', {
         matchId: match.matchId,
@@ -593,6 +669,7 @@ function handleSocketMessage({ match, color, socket, payload }) {
           w: match.cooldownEndsAt.w,
           b: match.cooldownEndsAt.b,
         },
+        forfeitLock: serializeForfeitLock(match.forfeitLock),
       });
       broadcastState(match, {
         from,
@@ -616,6 +693,7 @@ function handleSocketMessage({ match, color, socket, payload }) {
       const now = Date.now();
       match.cooldownEndsAt.w = now;
       match.cooldownEndsAt.b = now;
+      clearForfeitLock(match);
       match.updatedAt = now;
       logEvent('new_game', {
         matchId: match.matchId,
@@ -682,19 +760,157 @@ function handleSocketMessage({ match, color, socket, payload }) {
   }
 }
 
-function createEmptyMatch({ matchId, cooldownMs }) {
+function handleRelaySocketMessage({ match, color, socket, payload }) {
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  switch (type) {
+    case 'relay': {
+      const event = sanitizeGameType(payload.event);
+      const relayPayload =
+        payload.payload && typeof payload.payload === 'object'
+          ? payload.payload
+          : {};
+      const stateHash =
+        typeof payload.stateHash === 'string' ? payload.stateHash.trim() : '';
+      const result =
+        typeof payload.result === 'string' ? payload.result.trim() : null;
+
+      if (!match.players.white || !match.players.black) {
+        sendJson(socket, { type: 'error', message: 'Waiting for opponent.' });
+        return;
+      }
+
+      match.updatedAt = Date.now();
+      match.sequence += 1;
+      const relayMessage = {
+        type: 'relay',
+        sequence: match.sequence,
+        matchId: match.matchId,
+        gameType: match.gameType,
+        fromColor: color,
+        event: event ?? null,
+        payload: relayPayload,
+        stateHash: stateHash || null,
+        result,
+        serverNow: Date.now(),
+      };
+      match.relayState = {
+        fromColor: color,
+        event: event ?? null,
+        payload: relayPayload,
+        stateHash: stateHash || null,
+        result,
+        at: relayMessage.serverNow,
+      };
+      logEvent('relay_message', {
+        matchId: match.matchId,
+        gameType: match.gameType,
+        fromColor: color,
+        event: event ?? null,
+        stateHash: stateHash || null,
+        hasResult: Boolean(result),
+      });
+      broadcastToConnected(match, relayMessage);
+      return;
+    }
+    case 'new_game': {
+      const requestedCooldown = sanitizeCooldownSeconds(payload.cooldownSeconds);
+      if (requestedCooldown != null) {
+        match.cooldownMs = requestedCooldown * 1000;
+      }
+      const now = Date.now();
+      match.cooldownEndsAt.w = now;
+      match.cooldownEndsAt.b = now;
+      clearForfeitLock(match);
+      match.relayState = null;
+      match.updatedAt = now;
+      logEvent('new_game', {
+        matchId: match.matchId,
+        gameType: match.gameType,
+        requestedByColor: color,
+        cooldownSeconds: Math.round(match.cooldownMs / 1000),
+      });
+      broadcastState(match);
+      return;
+    }
+    case 'set_piece_skin': {
+      const pieceSkinId = sanitizePieceSkinId(payload.pieceSkinId);
+      const player = playerForColor(match, color);
+      const playerId = player?.playerId ?? null;
+      if (!player) {
+        sendJson(socket, {
+          type: 'error',
+          message: 'Player slot unavailable.',
+        });
+        return;
+      }
+      if (!pieceSkinId) {
+        logEvent('piece_skin_rejected', {
+          matchId: match.matchId,
+          gameType: match.gameType,
+          color,
+          playerId,
+          reason: 'invalid_skin_id',
+          pieceSkinId: payload.pieceSkinId,
+        });
+        sendJson(socket, {
+          type: 'error',
+          message: 'Invalid piece skin id.',
+        });
+        return;
+      }
+      if (player.pieceSkinId === pieceSkinId) {
+        return;
+      }
+      player.pieceSkinId = pieceSkinId;
+      match.updatedAt = Date.now();
+      logEvent('piece_skin_updated', {
+        matchId: match.matchId,
+        gameType: match.gameType,
+        color,
+        playerId,
+        pieceSkinId,
+      });
+      broadcastState(match);
+      return;
+    }
+    case 'ping':
+      sendJson(socket, { type: 'pong', at: new Date().toISOString() });
+      return;
+    default:
+      logEvent('message_rejected', {
+        matchId: match.matchId,
+        gameType: match.gameType,
+        color,
+        reason: 'unknown_message_type',
+        type,
+      });
+      sendJson(socket, {
+        type: 'error',
+        message: `Unknown message type: ${type}`,
+      });
+      return;
+  }
+}
+
+function createEmptyMatch({ matchId, cooldownMs, gameType }) {
   const now = Date.now();
   return {
     matchId,
+    gameType,
     players: {
       white: null,
       black: null,
     },
     playersById: new Map(),
-    game: new Chess(),
+    game: gameType === GAME_TYPE_CHESS ? new Chess() : null,
+    relayState: null,
     sequence: 0,
     cooldownMs,
     cooldownEndsAt: { w: now, b: now },
+    forfeitLock: {
+      blockedColor: null,
+      releaseByColor: null,
+    },
     createdAt: now,
     updatedAt: now,
   };
@@ -702,20 +918,63 @@ function createEmptyMatch({ matchId, cooldownMs }) {
 
 function broadcastState(match, lastMove = null) {
   match.sequence += 1;
+  if (match.gameType === GAME_TYPE_CHESS) {
+    const terminal = getTerminalStatus(match.game);
+    const payload = {
+      type: 'state',
+      sequence: match.sequence,
+      matchId: match.matchId,
+      gameType: match.gameType,
+      status: !match.players.white || !match.players.black
+        ? 'waiting'
+        : terminal.gameOver
+        ? 'game_over'
+        : 'active',
+      fen: match.game.fen(),
+      turn: match.game.turn(),
+      history: match.game.history(),
+      players: {
+        w: match.players.white ? match.players.white.name : null,
+        b: match.players.black ? match.players.black.name : null,
+      },
+      pieceSkins: {
+        w: match.players.white?.pieceSkinId ?? DEFAULT_PIECE_SKIN_ID,
+        b: match.players.black?.pieceSkinId ?? DEFAULT_PIECE_SKIN_ID,
+      },
+      cooldownMs: match.cooldownMs,
+      cooldownSeconds: Math.round(match.cooldownMs / 1000),
+      cooldownEndsAt: match.cooldownEndsAt,
+      forfeitLock: serializeForfeitLock(match.forfeitLock),
+      serverNow: Date.now(),
+    };
 
-  const terminal = getTerminalStatus(match.game);
+    if (lastMove) {
+      payload.lastMove = lastMove;
+    }
+    if (terminal.gameOver && terminal.result) {
+      payload.result = terminal.result;
+    }
+
+    broadcastToConnected(match, payload);
+    return;
+  }
+
+  const relayResult =
+    match.relayState &&
+    typeof match.relayState.result === 'string' &&
+    match.relayState.result.trim().length > 0
+      ? match.relayState.result.trim()
+      : null;
   const payload = {
     type: 'state',
     sequence: match.sequence,
     matchId: match.matchId,
+    gameType: match.gameType,
     status: !match.players.white || !match.players.black
       ? 'waiting'
-      : terminal.gameOver
+      : relayResult
       ? 'game_over'
       : 'active',
-    fen: match.game.fen(),
-    turn: match.game.turn(),
-    history: match.game.history(),
     players: {
       w: match.players.white ? match.players.white.name : null,
       b: match.players.black ? match.players.black.name : null,
@@ -727,16 +986,11 @@ function broadcastState(match, lastMove = null) {
     cooldownMs: match.cooldownMs,
     cooldownSeconds: Math.round(match.cooldownMs / 1000),
     cooldownEndsAt: match.cooldownEndsAt,
+    forfeitLock: serializeForfeitLock(match.forfeitLock),
+    relayState: match.relayState,
+    result: relayResult,
     serverNow: Date.now(),
   };
-
-  if (lastMove) {
-    payload.lastMove = lastMove;
-  }
-  if (terminal.gameOver && terminal.result) {
-    payload.result = terminal.result;
-  }
-
   broadcastToConnected(match, payload);
 }
 
@@ -799,11 +1053,47 @@ function setCooldownForMover(match, moverColor, atMs) {
   const nextReady = atMs + match.cooldownMs;
   if (moverColor === 'w') {
     match.cooldownEndsAt.w = nextReady;
-    match.cooldownEndsAt.b = atMs;
     return;
   }
   match.cooldownEndsAt.b = nextReady;
-  match.cooldownEndsAt.w = atMs;
+}
+
+function setForfeitLock(match, { blockedColor, releaseByColor }) {
+  if (!['w', 'b'].includes(blockedColor) || !['w', 'b'].includes(releaseByColor)) {
+    return;
+  }
+  match.forfeitLock.blockedColor = blockedColor;
+  match.forfeitLock.releaseByColor = releaseByColor;
+}
+
+function clearForfeitLock(match) {
+  match.forfeitLock.blockedColor = null;
+  match.forfeitLock.releaseByColor = null;
+}
+
+function maybeResolveForfeitLockTimeout(match, nowMs) {
+  const releaseByColor = match.forfeitLock.releaseByColor;
+  if (!releaseByColor) {
+    return;
+  }
+  const releaseReadyAt = match.cooldownEndsAt[releaseByColor] || 0;
+  if (nowMs >= releaseReadyAt) {
+    clearForfeitLock(match);
+  }
+}
+
+function isColorBlockedByForfeitLock(match, color) {
+  return match.forfeitLock.blockedColor === color;
+}
+
+function serializeForfeitLock(lock) {
+  if (!lock) {
+    return { blockedColor: null, releaseByColor: null };
+  }
+  return {
+    blockedColor: lock.blockedColor ?? null,
+    releaseByColor: lock.releaseByColor ?? null,
+  };
 }
 
 function getTerminalStatus(game) {
@@ -868,6 +1158,21 @@ function sanitizeName(value) {
     return null;
   }
   return trimmed;
+}
+
+function sanitizeGameType(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized.length < 1 ||
+    normalized.length > MAX_PIECE_SKIN_ID_LENGTH ||
+    !PIECE_SKIN_ID_PATTERN.test(normalized)
+  ) {
+    return null;
+  }
+  return normalized;
 }
 
 function sanitizeCooldownSeconds(value) {

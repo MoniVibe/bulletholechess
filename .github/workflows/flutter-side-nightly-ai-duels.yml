@@ -20,6 +20,9 @@ jobs:
           channel: stable
           cache: false
 
+      - name: Verify shared dependency pin
+        run: dart tool/verify_shared_dependency.dart
+
       - name: Install dependencies
         run: flutter pub get
 

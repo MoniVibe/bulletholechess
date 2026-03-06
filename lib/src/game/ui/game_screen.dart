@@ -83,6 +83,26 @@ class _GameScreenState extends State<GameScreen> {
 
     final whiteRemaining = _controller.cooldownRemaining('w');
     final blackRemaining = _controller.cooldownRemaining('b');
+    final totalTurnTime = _controller.cooldownDuration;
+    final hasActiveGame = _controller.hasActiveGame;
+    final timerHasStarted =
+        hasActiveGame &&
+        (_controller.playerLastMoveFrom != null ||
+            _controller.opponentLastMoveFrom != null);
+
+    Duration rawRemainingForColor(String color) {
+      return color == 'w' ? whiteRemaining : blackRemaining;
+    }
+
+    Duration displayedRemainingForColor(String color) {
+      if (!hasActiveGame) {
+        return Duration.zero;
+      }
+      if (!timerHasStarted) {
+        return color == 'w' ? totalTurnTime : Duration.zero;
+      }
+      return rawRemainingForColor(color);
+    }
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -213,12 +233,10 @@ class _GameScreenState extends State<GameScreen> {
                   final bottomColor = _controller.playerColor;
                   final whiteIsPlayer = _controller.playerColor == 'w';
                   final blackIsPlayer = _controller.playerColor == 'b';
-                  final topRemaining = topColor == 'w'
-                      ? whiteRemaining
-                      : blackRemaining;
-                  final bottomRemaining = bottomColor == 'w'
-                      ? whiteRemaining
-                      : blackRemaining;
+                  final topRemaining = displayedRemainingForColor(topColor);
+                  final bottomRemaining = displayedRemainingForColor(
+                    bottomColor,
+                  );
                   final topIsPlayer = topColor == 'w'
                       ? whiteIsPlayer
                       : blackIsPlayer;

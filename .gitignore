@@ -38,6 +38,7 @@ pnpm-debug.log*
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
+pubspec_overrides.yaml
 .pub/
 .pub-cache/
 .packages

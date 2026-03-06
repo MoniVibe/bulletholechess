@@ -57,8 +57,7 @@ class ChessBoardView extends StatelessWidget {
   final ValueChanged<String> onSquareTap;
 
   static const String _files = 'abcdefgh';
-  // Visual-only scale while keeping the piece anchor centered in each square.
-  static const double _pieceVisualScale = 1.4;
+  static const double _pieceVisualScale = 1.8;
   static const TextStyle _pieceFallbackStyle = TextStyle(
     fontSize: 30,
     fontWeight: FontWeight.w700,
@@ -80,28 +79,14 @@ class ChessBoardView extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
-        child: GridView.builder(
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: 64,
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 8,
-          ),
-          itemBuilder: (context, index) {
-            final boardIndex = playerColor == 'w' ? index : 63 - index;
-            final row = boardIndex ~/ 8;
-            final col = boardIndex % 8;
-            final square = '${_files[col]}${8 - row}';
-            final piece = pieces[square];
-            final isDarkSquare = (row + col).isOdd;
-            final isSelected = selectedSquare == square;
-            final isTarget = legalTargets.contains(square);
-            final isPrimaryMoveSquare =
-                square == lastMoveFrom || square == lastMoveTo;
-            final isSecondaryMoveSquare =
-                square == secondaryMoveFrom || square == secondaryMoveTo;
-            final isQueuedSquare =
-                square == queuedMoveFrom || square == queuedMoveTo;
-            final isCheckedKingSquare = checkedKingSquares.contains(square);
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final playableRect = Rect.fromLTWH(
+              constraints.maxWidth * playableInsetRatio,
+              constraints.maxHeight * playableInsetRatio,
+              constraints.maxWidth * playableSizeRatio,
+              constraints.maxHeight * playableSizeRatio,
+            );
 
             return Stack(
               children: <Widget>[
@@ -142,6 +127,9 @@ class ChessBoardView extends StatelessWidget {
                           square == secondaryMoveTo;
                       final isQueuedSquare =
                           square == queuedMoveFrom || square == queuedMoveTo;
+                      final isCheckedKingSquare = checkedKingSquares.contains(
+                        square,
+                      );
 
                       var squareOverlayColor = Colors.transparent;
                       if (isPrimaryMoveSquare) {
@@ -218,6 +206,40 @@ class ChessBoardView extends StatelessWidget {
                                     ),
                                   ),
                                 ),
+                              if (isCheckedKingSquare)
+                                Positioned.fill(
+                                  child: IgnorePointer(
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        gradient: RadialGradient(
+                                          colors: <Color>[
+                                            const Color(
+                                              0x00FFFFFF,
+                                            ).withValues(alpha: 0),
+                                            const Color(0xFFFBC02D).withValues(
+                                              alpha: isCheckmate ? 0.26 : 0.18,
+                                            ),
+                                            const Color(0xFFD84315).withValues(
+                                              alpha: isCheckmate ? 0.4 : 0.28,
+                                            ),
+                                          ],
+                                          stops: const <double>[
+                                            0.45,
+                                            0.78,
+                                            1.0,
+                                          ],
+                                        ),
+                                        border: Border.all(
+                                          color: const Color(0xFFF57F17)
+                                              .withValues(
+                                                alpha: isCheckmate ? 0.9 : 0.72,
+                                              ),
+                                          width: isCheckmate ? 3 : 2,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               if (piece != null)
                                 Positioned.fill(
                                   child: LayoutBuilder(
@@ -252,98 +274,6 @@ class ChessBoardView extends StatelessWidget {
                                   ),
                                 ),
                               ),
-                      ),
-                    if (isQueuedSquare)
-                      Positioned.fill(
-                        child: Padding(
-                          padding: const EdgeInsets.all(4),
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: const Color(0xFF006064),
-                                width: 2,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    if (isCheckedKingSquare)
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: RadialGradient(
-                                colors: <Color>[
-                                  const Color(0x00FFFFFF).withValues(alpha: 0),
-                                  const Color(0xFFFBC02D).withValues(
-                                    alpha: isCheckmate ? 0.26 : 0.18,
-                                  ),
-                                  const Color(
-                                    0xFFD84315,
-                                  ).withValues(alpha: isCheckmate ? 0.4 : 0.28),
-                                ],
-                                stops: const <double>[0.45, 0.78, 1.0],
-                              ),
-                              border: Border.all(
-                                color: const Color(
-                                  0xFFF57F17,
-                                ).withValues(alpha: isCheckmate ? 0.9 : 0.72),
-                                width: isCheckmate ? 3 : 2,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    if (boardMessage != null && boardMessage!.isNotEmpty)
-                      Positioned(
-                        left: 8,
-                        right: 8,
-                        top: 8,
-                        child: IgnorePointer(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: const Color(0xEE1B1B1B),
-                              borderRadius: BorderRadius.circular(999),
-                              border: Border.all(
-                                color: const Color(0xD9FBC02D),
-                                width: isCheckmate ? 1.5 : 1,
-                              ),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
-                              child: Text(
-                                boardMessage!,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: Color(0xFFF9F6EE),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.1,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    if (piece != null)
-                      Center(
-                        child: Text(
-                          piece,
-                          style: TextStyle(
-                            fontSize: 30,
-                            fontWeight: FontWeight.w700,
-                            color: piece == piece.toUpperCase()
-                                ? const Color(0xFFF6F1E7)
-                                : const Color(0xFF1A1A1A),
-                            shadows: const [
-                              Shadow(
-                                color: Colors.black26,
-                                blurRadius: 2,
-                                offset: Offset(0, 1),
-                              ),
                             ],
                           ),
                         ),
@@ -351,6 +281,40 @@ class ChessBoardView extends StatelessWidget {
                     },
                   ),
                 ),
+                if (boardMessage != null && boardMessage!.isNotEmpty)
+                  Positioned(
+                    left: playableRect.left + 8,
+                    top: playableRect.top + 8,
+                    width: playableRect.width - 16,
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: const Color(0xEE1B1B1B),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: const Color(0xD9FBC02D),
+                            width: isCheckmate ? 1.5 : 1,
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          child: Text(
+                            boardMessage!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Color(0xFFF9F6EE),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.1,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             );
           },

@@ -35,42 +35,39 @@ void main() {
     expect(controller.canPlayerInteract, isTrue);
   });
 
-  test(
-    'player is immediately interactive after AI move even with cooldown',
-    () async {
-      final controller = ChessAiGameController(
-        aiMoveDelay: const Duration(milliseconds: 1),
-        initialCooldownDuration: const Duration(seconds: 10),
-      );
-      addTearDown(controller.dispose);
+  test('player stays on own cooldown after AI move', () async {
+    final controller = ChessAiGameController(
+      aiMoveDelay: const Duration(milliseconds: 1),
+      initialCooldownDuration: const Duration(seconds: 10),
+    );
+    addTearDown(controller.dispose);
 
-      controller.startNewGame(
-        playerAsWhite: true,
-        cooldownDuration: const Duration(seconds: 10),
-      );
+    controller.startNewGame(
+      playerAsWhite: true,
+      cooldownDuration: const Duration(seconds: 10),
+    );
 
-      // White opening move.
-      controller.tapSquare('e2');
-      controller.tapSquare('e4');
+    // White opening move.
+    controller.tapSquare('e2');
+    controller.tapSquare('e4');
 
-      // Wait for AI reply to be applied.
-      final deadline = DateTime.now().add(const Duration(seconds: 2));
-      while (controller.history.length < 2 &&
-          DateTime.now().isBefore(deadline)) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
+    // Wait for AI reply to be applied.
+    final deadline = DateTime.now().add(const Duration(seconds: 2));
+    while (controller.history.length < 2 && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
 
-      expect(controller.history.length, greaterThanOrEqualTo(2));
-      expect(controller.canPlayerInteract, isTrue);
-      expect(controller.cooldownRemaining('w'), Duration.zero);
-    },
-  );
+    expect(controller.history.length, greaterThanOrEqualTo(2));
+    expect(controller.canPlayerInteract, isFalse);
+    expect(controller.cooldownRemaining('w').inMilliseconds, greaterThan(0));
+  });
 
   test(
     'can queue a move while AI is thinking and auto-executes when legal',
     () async {
       final controller = ChessAiGameController(
         aiMoveDelay: const Duration(milliseconds: 1),
+        initialCooldownDuration: const Duration(milliseconds: 200),
         aiEngine: _DeterministicAiEngine(),
       );
       addTearDown(controller.dispose);
