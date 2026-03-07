@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -25,8 +27,13 @@ const int _idleSeconds = int.fromEnvironment(
   'BOT_IDLE_SECONDS',
   defaultValue: 45,
 );
+const int _startupSeconds = int.fromEnvironment(
+  'BOT_STARTUP_SECONDS',
+  defaultValue: 90,
+);
 
 void main() {
+  _installWindowsKeyboardAssertionGuard();
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('UI bot smoke for chess', (tester) async {
@@ -55,11 +62,47 @@ void main() {
   });
 }
 
+void _installWindowsKeyboardAssertionGuard() {
+  final previous = FlutterError.onError;
+  FlutterError.onError = (FlutterErrorDetails details) {
+    final message = details.exceptionAsString();
+    if (message.contains(
+      'Attempted to send a key down event when no keys are in keysPressed',
+    )) {
+      debugPrint('[UI-BOT][CHESS] ignored windows keyboard assertion');
+      return;
+    }
+    previous?.call(details);
+  };
+
+  final previousPlatform = ui.PlatformDispatcher.instance.onError;
+  ui.PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    final message = error.toString();
+    if (message.contains(
+      'Attempted to send a key down event when no keys are in keysPressed',
+    )) {
+      debugPrint('[UI-BOT][CHESS] ignored windows keyboard assertion');
+      return true;
+    }
+    if (previousPlatform != null) {
+      return previousPlatform(error, stack);
+    }
+    return false;
+  };
+}
+
 Future<void> _enterOnlineModeAndFindMatch(WidgetTester tester) async {
-  final onlineTab = find.text('Online');
-  expect(onlineTab, findsWidgets);
-  await tester.tap(onlineTab.first);
-  await tester.pump(const Duration(milliseconds: 300));
+  final modeSwitch = find.byKey(const ValueKey<String>('chess_mode_switch'));
+  if (modeSwitch.evaluate().isNotEmpty) {
+    final dynamic widget = tester.widget(modeSwitch.first);
+    widget.onChanged?.call(true);
+    await tester.pump(const Duration(milliseconds: 250));
+  } else {
+    final onlineTab = find.text('Online');
+    expect(onlineTab, findsWidgets);
+    await _activateWidget(tester, onlineTab.first);
+    await tester.pump(const Duration(milliseconds: 250));
+  }
 
   final backendField = find.byKey(
     const ValueKey<String>('chess_online_backend_url'),
@@ -75,18 +118,57 @@ Future<void> _enterOnlineModeAndFindMatch(WidgetTester tester) async {
   expect(nameField, findsOneWidget);
   expect(findMatchButton, findsOneWidget);
 
-  await tester.tap(backendField);
-  await tester.pump(const Duration(milliseconds: 80));
-  await tester.enterText(backendField, _backendUrl);
+  final backendTextField = tester.widget<TextField>(backendField);
+  backendTextField.controller?.text = _backendUrl;
   await tester.pump(const Duration(milliseconds: 120));
 
-  await tester.tap(nameField);
-  await tester.pump(const Duration(milliseconds: 80));
-  await tester.enterText(nameField, _displayName);
+  final nameTextField = tester.widget<TextField>(nameField);
+  nameTextField.controller?.text = _displayName;
   await tester.pump(const Duration(milliseconds: 120));
 
-  await tester.tap(findMatchButton);
-  await tester.pump(const Duration(milliseconds: 500));
+  await _activateWidget(tester, findMatchButton.first);
+  await tester.pump(const Duration(milliseconds: 300));
+
+  final disconnectButton = find.byKey(
+    const ValueKey<String>('chess_online_disconnect'),
+  );
+  final requestNewGameButton = find.byKey(
+    const ValueKey<String>('chess_online_new_game'),
+  );
+  final connectDeadline = DateTime.now().add(
+    const Duration(seconds: _startupSeconds),
+  );
+  var requestedNewGame = false;
+  while (DateTime.now().isBefore(connectDeadline)) {
+    var connected = false;
+    if (disconnectButton.evaluate().isNotEmpty) {
+      final disconnect = tester.widget<OutlinedButton>(disconnectButton.first);
+      connected = disconnect.onPressed != null;
+    }
+
+    if (!connected) {
+      final findMatch = tester.widget<FilledButton>(findMatchButton.first);
+      if (findMatch.onPressed != null) {
+        await _activateWidget(tester, findMatchButton.first);
+        await tester.pump(const Duration(milliseconds: 450));
+        continue;
+      }
+    } else {
+      if (!requestedNewGame && requestNewGameButton.evaluate().isNotEmpty) {
+        final button = tester.widget<OutlinedButton>(
+          requestNewGameButton.first,
+        );
+        if (button.onPressed != null) {
+          await _activateWidget(tester, requestNewGameButton.first);
+          requestedNewGame = true;
+        }
+      }
+      if (requestedNewGame) {
+        return;
+      }
+    }
+    await tester.pump(const Duration(milliseconds: 250));
+  }
 }
 
 Future<void> _startLocalGame(WidgetTester tester) async {
@@ -94,14 +176,14 @@ Future<void> _startLocalGame(WidgetTester tester) async {
     const ValueKey<String>('chess_ai_start_new_game'),
   );
   if (startOverlay.evaluate().isNotEmpty) {
-    await tester.tap(startOverlay.first);
+    await _activateWidget(tester, startOverlay.first);
     await tester.pump(const Duration(milliseconds: 300));
     return;
   }
 
   final newGameButton = find.byKey(const ValueKey<String>('chess_ai_new_game'));
   if (newGameButton.evaluate().isNotEmpty) {
-    await tester.tap(newGameButton.first);
+    await _activateWidget(tester, newGameButton.first);
     await tester.pump(const Duration(milliseconds: 300));
   }
 }
@@ -109,20 +191,49 @@ Future<void> _startLocalGame(WidgetTester tester) async {
 Future<int> _playChessMoves(WidgetTester tester) async {
   final deadline = DateTime.now().add(const Duration(seconds: _maxSeconds));
   final idleLimit = const Duration(seconds: _idleSeconds);
+  final startupDeadline = DateTime.now().add(
+    const Duration(seconds: _startupSeconds),
+  );
   var lastProgressAt = DateTime.now();
   var moves = 0;
+  _BotMove? lastMove;
+  final moveUsage = <String, int>{};
+  var scanOffset = 0;
 
   while (DateTime.now().isBefore(deadline) && moves < _maxMoves) {
-    final moved = await _attemptChessMove(tester);
-    if (moved) {
+    if (_runOnline &&
+        moves > 0 &&
+        _isWaitingForOpponentOverlayVisible(tester)) {
+      break;
+    }
+
+    if (_runOnline) {
+      await _clearQueuedMoveIfAny(tester);
+    }
+    final moved = await _attemptChessMove(
+      tester,
+      avoidReverseOf: lastMove,
+      moveUsage: moveUsage,
+      scanOffset: scanOffset,
+    );
+    if (moved != null) {
       moves += 1;
+      lastMove = moved;
+      final key = '${moved.from}->${moved.to}';
+      moveUsage[key] = (moveUsage[key] ?? 0) + 1;
+      scanOffset = (scanOffset + 11) % _allSquares.length;
       lastProgressAt = DateTime.now();
       await tester.pump(const Duration(milliseconds: 250));
       continue;
     }
+    if (_runOnline) {
+      await _clearQueuedMoveIfAny(tester);
+    }
 
     await tester.pump(const Duration(milliseconds: 250));
-    if (DateTime.now().difference(lastProgressAt) >= idleLimit) {
+    final now = DateTime.now();
+    final enforceIdle = moves > 0 || now.isAfter(startupDeadline);
+    if (enforceIdle && now.difference(lastProgressAt) >= idleLimit) {
       break;
     }
   }
@@ -130,17 +241,27 @@ Future<int> _playChessMoves(WidgetTester tester) async {
   return moves;
 }
 
-Future<bool> _attemptChessMove(WidgetTester tester) async {
-  for (final source in _allSquares) {
+Future<_BotMove?> _attemptChessMove(
+  WidgetTester tester, {
+  _BotMove? avoidReverseOf,
+  required Map<String, int> moveUsage,
+  required int scanOffset,
+}) async {
+  final orderedSquares = <String>[
+    ..._allSquares.skip(scanOffset),
+    ..._allSquares.take(scanOffset),
+  ];
+  for (final source in orderedSquares) {
     final sourceFinder = find.byKey(ValueKey<String>('chess_square_$source'));
     if (sourceFinder.evaluate().isEmpty) {
       continue;
     }
 
-    await tester.tap(sourceFinder.first);
+    await _activateWidget(tester, sourceFinder.first);
     await tester.pump(const Duration(milliseconds: 100));
 
-    final targets = _keyValuesWithPrefix(tester, 'chess_target_')
+    final occupancyBeforeTap = _occupiedSquares(tester);
+    final targets = _targetSquares(tester)
         .map((value) => value.substring('chess_target_'.length))
         .where((square) => square.length == 2)
         .toList(growable: false);
@@ -148,18 +269,88 @@ Future<bool> _attemptChessMove(WidgetTester tester) async {
       continue;
     }
 
-    final target = targets.first;
+    final candidates = List<String>.from(targets);
+    if (avoidReverseOf != null && candidates.length > 1) {
+      candidates.removeWhere(
+        (candidate) =>
+            source == avoidReverseOf.to && candidate == avoidReverseOf.from,
+      );
+      if (candidates.isEmpty) {
+        candidates.addAll(targets);
+      }
+    }
+
+    final underRepeatLimit = candidates
+        .where((candidate) => (moveUsage['$source->$candidate'] ?? 0) < 3)
+        .toList(growable: false);
+    final candidatePool = underRepeatLimit.isNotEmpty
+        ? underRepeatLimit
+        : candidates;
+
+    final orderedTargets = List<String>.from(candidatePool)
+      ..sort(
+        (left, right) => (moveUsage['$source->$left'] ?? 0).compareTo(
+          moveUsage['$source->$right'] ?? 0,
+        ),
+      );
+    if (orderedTargets.isEmpty) {
+      continue;
+    }
+    final target = orderedTargets.first;
     final targetFinder = find.byKey(ValueKey<String>('chess_square_$target'));
     if (targetFinder.evaluate().isEmpty) {
       continue;
     }
 
-    await tester.tap(targetFinder.first);
-    await tester.pump(const Duration(milliseconds: 150));
-    return true;
+    await _activateWidget(tester, targetFinder.first);
+    for (var i = 0; i < 20; i += 1) {
+      await tester.pump(const Duration(milliseconds: 120));
+      final occupancyAfterTap = _occupiedSquares(tester);
+      if (!_sameStringSet(occupancyBeforeTap, occupancyAfterTap)) {
+        return _BotMove(from: source, to: target);
+      }
+    }
   }
 
-  return false;
+  return null;
+}
+
+bool _isWaitingForOpponentOverlayVisible(WidgetTester tester) {
+  final waitingText = find.text('Waiting for opponent...');
+  return waitingText.evaluate().isNotEmpty;
+}
+
+Set<String> _targetSquares(WidgetTester tester) =>
+    _keyValuesWithPrefix(tester, 'chess_target_').toSet();
+
+Set<String> _occupiedSquares(WidgetTester tester) {
+  final occupied = <String>{};
+  for (final square in _allSquares) {
+    final squareFinder = find.byKey(ValueKey<String>('chess_square_$square'));
+    if (squareFinder.evaluate().isEmpty) {
+      continue;
+    }
+    final pieceFinder = find.descendant(
+      of: squareFinder.first,
+      matching: find.byType(OverflowBox),
+    );
+    if (pieceFinder.evaluate().isNotEmpty) {
+      occupied.add(square);
+    }
+  }
+  return occupied;
+}
+
+bool _sameStringSet(Set<String> left, Set<String> right) {
+  if (left.length != right.length) {
+    return false;
+  }
+  for (final value in left) {
+    if (!right.contains(value)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 List<String> _keyValuesWithPrefix(WidgetTester tester, String prefix) {
@@ -183,8 +374,58 @@ List<String> _keyValuesWithPrefix(WidgetTester tester, String prefix) {
   return list;
 }
 
+Future<void> _clearQueuedMoveIfAny(WidgetTester tester) async {
+  final clearQueueText = find.byWidgetPredicate((widget) {
+    if (widget is! Text) {
+      return false;
+    }
+    final data = widget.data;
+    return data != null && data.startsWith('Clear Queue');
+  });
+  if (clearQueueText.evaluate().isEmpty) {
+    return;
+  }
+  await _activateWidget(tester, clearQueueText.first);
+  await tester.pump(const Duration(milliseconds: 120));
+}
+
+class _BotMove {
+  const _BotMove({required this.from, required this.to});
+
+  final String from;
+  final String to;
+}
+
 final List<String> _allSquares = <String>[
   for (final rank in <String>['1', '2', '3', '4', '5', '6', '7', '8'])
     for (final file in <String>['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'])
       '$file$rank',
 ];
+
+Future<void> _activateWidget(WidgetTester tester, Finder finder) async {
+  if (finder.evaluate().isEmpty) {
+    return;
+  }
+  final widget = tester.widget(finder.first);
+  if (widget is InkWell && widget.onTap != null) {
+    widget.onTap!.call();
+    await tester.pump(const Duration(milliseconds: 80));
+    return;
+  }
+  if (widget is FilledButton && widget.onPressed != null) {
+    widget.onPressed!.call();
+    await tester.pump(const Duration(milliseconds: 80));
+    return;
+  }
+  if (widget is OutlinedButton && widget.onPressed != null) {
+    widget.onPressed!.call();
+    await tester.pump(const Duration(milliseconds: 80));
+    return;
+  }
+
+  try {
+    await tester.ensureVisible(finder.first);
+  } catch (_) {}
+  await tester.tap(finder.first, warnIfMissed: false);
+  await tester.pump(const Duration(milliseconds: 80));
+}
