@@ -674,6 +674,7 @@ function handleSocketMessage({ match, color, socket, payload }) {
         from,
         to,
         promotion,
+        color,
         clientMoveId,
         source,
         queueToken,

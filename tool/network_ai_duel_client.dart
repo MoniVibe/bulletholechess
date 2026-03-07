@@ -88,6 +88,8 @@ class _ChessNetworkAiSession {
   bool _moveInFlight = false;
   int _nextClientMoveId = 1;
   int? _inFlightClientMoveId;
+  String? _inFlightFrom;
+  String? _inFlightTo;
   int? _lastAttemptSequence;
   final Map<String, int> _cooldownEndsAt = <String, int>{'w': 0, 'b': 0};
   Map<String, dynamic>? _forfeitLock;
@@ -175,6 +177,8 @@ class _ChessNetworkAiSession {
       case 'error':
         _moveInFlight = false;
         _inFlightClientMoveId = null;
+        _inFlightFrom = null;
+        _inFlightTo = null;
         _updateClockOffset(message['serverNow']);
         _updateCooldownSnapshot(message['cooldownEndsAt']);
         _forfeitLock = _readMap(message['forfeitLock']) ?? _forfeitLock;
@@ -229,9 +233,18 @@ class _ChessNetworkAiSession {
       final ackMoveId = MultiplayerClientUtils.readInt(
         lastMove['clientMoveId'],
       );
-      if (ackMoveId != null && ackMoveId == _inFlightClientMoveId) {
+      final ackColor = (lastMove['color'] as String?)?.trim().toLowerCase();
+      final ackFrom = (lastMove['from'] as String?)?.trim().toLowerCase();
+      final ackTo = (lastMove['to'] as String?)?.trim().toLowerCase();
+      final ackMatchesMoveId = ackMoveId != null && ackMoveId == _inFlightClientMoveId;
+      final ackMatchesSender = ackColor != null
+          ? ackColor == _myColor
+          : (ackFrom == _inFlightFrom && ackTo == _inFlightTo);
+      if (ackMatchesMoveId && ackMatchesSender) {
         _moveInFlight = false;
         _inFlightClientMoveId = null;
+        _inFlightFrom = null;
+        _inFlightTo = null;
         logger.log(<String, Object?>{
           'event': 'move_acked',
           'at': DateTime.now().toIso8601String(),
@@ -334,6 +347,8 @@ class _ChessNetworkAiSession {
     _lastAttemptSequence = _sequence;
     _moveInFlight = true;
     _inFlightClientMoveId = clientMoveId;
+    _inFlightFrom = move.from;
+    _inFlightTo = move.to;
     logger.log(<String, Object?>{
       'event': 'move_sent',
       'at': DateTime.now().toIso8601String(),
