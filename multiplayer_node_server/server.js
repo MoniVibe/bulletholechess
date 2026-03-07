@@ -402,6 +402,7 @@ function handleSocketMessage({ match, color, socket, payload }) {
       const attemptedTo = sanitizeSquare(payload.to);
       const attemptedPromotion = sanitizePromotion(payload.promotion);
       const clientMoveId = sanitizeMoveId(payload.clientMoveId);
+      const expectedSequence = sanitizeSequence(payload.expectedSequence);
       const source = sanitizeMoveSource(payload.source);
       const queueToken = sanitizeMoveId(payload.queueToken);
       const player = playerForColor(match, color);
@@ -414,6 +415,7 @@ function handleSocketMessage({ match, color, socket, payload }) {
         to: attemptedTo,
         promotion: attemptedPromotion,
         clientMoveId,
+        expectedSequence,
         source,
         queueToken,
       });
@@ -472,6 +474,27 @@ function handleSocketMessage({ match, color, socket, payload }) {
           cooldownEndsAt: match.cooldownEndsAt,
           forfeitLock: serializeForfeitLock(match.forfeitLock),
           serverNow: now,
+        });
+        return;
+      }
+      if (expectedSequence !== null && expectedSequence !== match.sequence) {
+        logEvent('move_rejected', {
+          matchId: match.matchId,
+          color,
+          playerId,
+          reason: 'stale_state',
+          expectedSequence,
+          currentSequence: match.sequence,
+        });
+        sendJson(socket, {
+          type: 'error',
+          code: 'stale_state',
+          message: 'Client state is stale. Wait for latest board update.',
+          expectedSequence,
+          currentSequence: match.sequence,
+          cooldownEndsAt: match.cooldownEndsAt,
+          forfeitLock: serializeForfeitLock(match.forfeitLock),
+          serverNow: Date.now(),
         });
         return;
       }
@@ -1217,6 +1240,14 @@ function sanitizePromotion(value) {
 function sanitizeMoveId(value) {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
+
+function sanitizeSequence(value) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
     return null;
   }
   return parsed;

@@ -819,6 +819,7 @@ class OnlineGameController extends ChangeNotifier {
       'from': from,
       'to': to,
       'clientMoveId': moveId,
+      'expectedSequence': _sequence,
       'source': source,
       'queueToken': queueToken,
     };
@@ -837,6 +838,7 @@ class OnlineGameController extends ChangeNotifier {
       'send_move_payload',
       details: <String, Object?>{
         'clientMoveId': moveId,
+        'expectedSequence': _sequence,
         'source': source,
         'queueToken': queueToken,
         'from': from,
@@ -1414,11 +1416,15 @@ class OnlineGameController extends ChangeNotifier {
   }
 
   bool _isRetriableQueueError(String? code, String message) {
-    if (code == 'cooldown_active' || code == 'forfeit_waiting_release') {
+    if (code == 'cooldown_active' ||
+        code == 'forfeit_waiting_release' ||
+        code == 'stale_state') {
       return true;
     }
     final lowered = message.toLowerCase();
-    return lowered.contains('cooldown') || lowered.contains('forfeit');
+    return lowered.contains('cooldown') ||
+        lowered.contains('forfeit') ||
+        lowered.contains('stale');
   }
 
   bool _isBlockedByForfeitLock(String color, {bool resolveTimeout = true}) {

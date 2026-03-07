@@ -347,6 +347,7 @@ class _ChessNetworkAiSession {
       'promotion': move.promotion,
       'source': 'manual',
       'clientMoveId': clientMoveId,
+      'expectedSequence': _sequence,
     });
     if (!sent) {
       return;
