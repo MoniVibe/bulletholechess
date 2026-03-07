@@ -1,0 +1,4 @@
+{
+  "APP_ENV": "production",
+  "DEFAULT_BACKEND_URL": "https://backend.example.com"
+}

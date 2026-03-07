@@ -1,0 +1,4 @@
+{
+  "APP_ENV": "staging",
+  "DEFAULT_BACKEND_URL": "https://staging-backend.example.com"
+}

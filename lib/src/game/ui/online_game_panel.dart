@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:bullethole_shared/bullethole_shared.dart';
 import 'package:flutter/material.dart';
 
+import '../config/app_runtime_config.dart';
 import '../engine/online_game_controller.dart';
 import 'app_assets.dart';
 import 'chess_board_view.dart';
@@ -26,10 +27,6 @@ class OnlineGamePanel extends StatefulWidget {
 
 class _OnlineGamePanelState extends State<OnlineGamePanel> {
   static const List<int> _cooldownOptionsSeconds = [2, 3, 5, 7, 10];
-  static const String _defaultBackendUrl = String.fromEnvironment(
-    'DEFAULT_BACKEND_URL',
-    defaultValue: 'http://localhost:8080',
-  );
   static const Set<String> _ownedChessPieceSkinIds = <String>{
     'chess_sashite_western',
     'chess_classic',
@@ -51,7 +48,9 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
   void initState() {
     super.initState();
     _controller = OnlineGameController();
-    _apiBaseController = TextEditingController(text: _defaultBackendUrl);
+    _apiBaseController = TextEditingController(
+      text: AppRuntimeConfig.defaultBackendUrl,
+    );
     _nameController = TextEditingController(text: 'Player');
     _checkBackendHealth();
   }

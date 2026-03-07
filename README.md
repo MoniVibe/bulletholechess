@@ -35,6 +35,36 @@ flutter pub get
 flutter run
 ```
 
+## Runtime environment config (ship-safe defaults)
+
+Backend URL and environment now come from `--dart-define` values.
+Use the checked-in env files:
+
+- `config/env/dev.json`
+- `config/env/staging.json`
+- `config/env/production.json`
+
+Examples:
+
+```bash
+flutter run --dart-define-from-file=config/env/dev.json
+flutter run --dart-define-from-file=config/env/staging.json
+flutter run --dart-define-from-file=config/env/production.json
+```
+
+Release build example:
+
+```bash
+flutter build apk --release --dart-define-from-file=config/env/production.json
+```
+
+Available keys:
+- `APP_ENV` (`dev`, `staging`, `production`)
+- `DEFAULT_BACKEND_URL` (preferred explicit backend URL)
+- `DEFAULT_BACKEND_URL_DEV`
+- `DEFAULT_BACKEND_URL_STAGING`
+- `DEFAULT_BACKEND_URL_PROD`
+
 ### Visual asset prep (new art drops)
 
 When replacing board/piece/time-bar images, preprocess them into transparent
