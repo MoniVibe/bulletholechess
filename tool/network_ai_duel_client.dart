@@ -294,9 +294,11 @@ class _ChessNetworkAiSession {
     final game = chess.Chess();
     final loaded = game.load(fen);
     if (!loaded) {
+      _lastAttemptSequence = _sequence;
       logger.log(<String, Object?>{
         'event': 'state_load_failed',
         'at': DateTime.now().toIso8601String(),
+        'sequence': _sequence,
         'fen': fen,
       });
       return;

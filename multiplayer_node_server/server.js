@@ -617,9 +617,7 @@ function handleSocketMessage({ match, color, socket, payload }) {
 
       const nominalTurnColor = match.game.turn();
       const movePayload = movePayloadFromLegalMove(legalMove);
-      const moved = withColorTurn(match.game, color, () =>
-        match.game.move(movePayload),
-      );
+      const moved = applyMoveAsColor(match.game, color, movePayload);
       if (!moved) {
         logEvent('move_rejected', {
           matchId: match.matchId,
@@ -1147,6 +1145,18 @@ function withColorTurn(game, color, callback) {
   } finally {
     game._turn = previousTurn;
   }
+}
+
+function applyMoveAsColor(game, color, movePayload) {
+  const previousTurn = game.turn();
+  game._turn = color;
+  const moved = game.move(movePayload);
+  if (!moved) {
+    game._turn = previousTurn;
+    return null;
+  }
+  // Keep the turn value produced by `game.move(...)` so FEN metadata stays valid.
+  return moved;
 }
 
 function sanitizeName(value) {
