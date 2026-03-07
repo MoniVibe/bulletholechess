@@ -1133,55 +1133,63 @@ function getTerminalStatus(game) {
 }
 
 function isCheckmateForColor(game, color) {
-  return withColorTurn(game, color, () => game.isCheckmate());
+  const gameForColor = cloneGameWithTurn(game, color);
+  return gameForColor.isCheckmate();
 }
 
 function isInCheckForColor(game, color) {
-  return withColorTurn(game, color, () => game.isCheck());
+  const gameForColor = cloneGameWithTurn(game, color);
+  return gameForColor.isCheck();
 }
 
 function hasAnyLegalMoveForColor(game, color) {
-  return withColorTurn(game, color, () => game.moves().length > 0);
+  const gameForColor = cloneGameWithTurn(game, color);
+  return gameForColor.moves().length > 0;
 }
 
 function findValidatedLegalMove({ game, from, to, promotion, color }) {
-  return withColorTurn(game, color, () => {
-    const legalMoves = game.moves({ verbose: true });
-    for (const move of legalMoves) {
-      if (move.from !== from || move.to !== to) {
-        continue;
-      }
-      if (!move.promotion) {
-        return move;
-      }
-      if (move.promotion === promotion) {
-        return move;
-      }
+  const gameForColor = cloneGameWithTurn(game, color);
+  const legalMoves = gameForColor.moves({ verbose: true });
+  for (const move of legalMoves) {
+    if (move.from !== from || move.to !== to) {
+      continue;
     }
-    return null;
-  });
-}
-
-function withColorTurn(game, color, callback) {
-  const previousTurn = game.turn();
-  game._turn = color;
-  try {
-    return callback();
-  } finally {
-    game._turn = previousTurn;
+    if (!move.promotion) {
+      return move;
+    }
+    if (move.promotion === promotion) {
+      return move;
+    }
   }
+  return null;
 }
 
 function applyMoveAsColor(game, color, movePayload) {
-  const previousTurn = game.turn();
-  game._turn = color;
-  const moved = game.move(movePayload);
-  if (!moved) {
-    game._turn = previousTurn;
+  const gameForColor = cloneGameWithTurn(game, color);
+  let moved = null;
+  try {
+    moved = gameForColor.move(movePayload);
+  } catch (_error) {
     return null;
   }
-  // Keep the turn value produced by `game.move(...)` so FEN metadata stays valid.
+  if (!moved) {
+    return null;
+  }
+  try {
+    game.load(gameForColor.fen());
+  } catch (_error) {
+    return null;
+  }
   return moved;
+}
+
+function cloneGameWithTurn(game, color) {
+  const fen = game.fen();
+  const parts = fen.split(' ');
+  if (parts.length >= 2) {
+    parts[1] = color;
+  }
+  return new Chess(parts.join(' '));
 }
 
 function sanitizeName(value) {
