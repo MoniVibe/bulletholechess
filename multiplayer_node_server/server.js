@@ -528,9 +528,8 @@ function handleSocketMessage({ match, color, socket, payload }) {
         return;
       }
 
-      const board = boardPiecesFromFen(match.game.fen());
-      const fromPiece = board[from] || null;
-      const toPiece = board[to] || null;
+      const fromPiece = match.game.get(from);
+      const toPiece = match.game.get(to);
       if (!fromPiece) {
         logEvent('move_rejected', {
           matchId: match.matchId,
@@ -550,7 +549,7 @@ function handleSocketMessage({ match, color, socket, payload }) {
         });
         return;
       }
-      if (!pieceBelongsToColor(fromPiece, color)) {
+      if (fromPiece.color !== color) {
         logEvent('move_rejected', {
           matchId: match.matchId,
           color,
@@ -561,7 +560,8 @@ function handleSocketMessage({ match, color, socket, payload }) {
           reason: 'piece_not_owned',
           from,
           to,
-          fromPiece,
+          fromPieceType: fromPiece.type,
+          fromPieceColor: fromPiece.color,
         });
         sendJson(socket, {
           type: 'error',
@@ -570,7 +570,7 @@ function handleSocketMessage({ match, color, socket, payload }) {
         });
         return;
       }
-      if (toPiece && pieceBelongsToColor(toPiece, color)) {
+      if (toPiece && toPiece.color === color) {
         logEvent('move_rejected', {
           matchId: match.matchId,
           color,
@@ -581,7 +581,8 @@ function handleSocketMessage({ match, color, socket, payload }) {
           reason: 'destination_occupied_by_own_piece',
           from,
           to,
-          toPiece,
+          toPieceType: toPiece.type,
+          toPieceColor: toPiece.color,
         });
         sendJson(socket, {
           type: 'error',
@@ -1240,43 +1241,6 @@ function sanitizePieceSkinId(value) {
     return null;
   }
   return normalized;
-}
-
-function pieceBelongsToColor(piece, color) {
-  if (typeof piece !== 'string' || piece.length === 0) {
-    return false;
-  }
-  const isWhitePiece = piece === piece.toUpperCase();
-  return color === 'w' ? isWhitePiece : !isWhitePiece;
-}
-
-function boardPiecesFromFen(fen) {
-  if (typeof fen !== 'string' || fen.length === 0) {
-    return {};
-  }
-  const files = 'abcdefgh';
-  const boardPart = fen.split(' ')[0];
-  const rows = boardPart.split('/');
-  const board = {};
-
-  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-    const row = rows[rowIndex];
-    let fileIndex = 0;
-    for (const symbol of row.split('')) {
-      const emptyCount = Number.parseInt(symbol, 10);
-      if (Number.isFinite(emptyCount)) {
-        fileIndex += emptyCount;
-        continue;
-      }
-      if (fileIndex >= 0 && fileIndex < files.length) {
-        const square = `${files[fileIndex]}${8 - rowIndex}`;
-        board[square] = symbol;
-      }
-      fileIndex += 1;
-    }
-  }
-
-  return board;
 }
 
 function movePayloadFromLegalMove(move) {
