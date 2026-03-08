@@ -299,6 +299,8 @@ This repo uses two GitHub Actions workflows:
 - `MATCHMAKER_AZURE_CLIENT_ID`
 - `MATCHMAKER_AZURE_TENANT_ID`
 - `MATCHMAKER_AZURE_SUBSCRIPTION_ID`
+- `PUREFLUTTER_REPO_TOKEN`
+  - GitHub PAT with read access to `meshik/pureflutter` (needed for `flutter pub get` git dependency in CI).
 
 ### Optional GitHub repository variables
 

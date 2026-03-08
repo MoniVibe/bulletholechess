@@ -24,7 +24,20 @@ jobs:
         run: dart tool/verify_shared_dependency.dart
 
       - name: Configure git auth for pub git dependencies
-        run: git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
+        shell: bash
+        env:
+          PUREFLUTTER_REPO_TOKEN: ${{ secrets.PUREFLUTTER_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PUREFLUTTER_REPO_TOKEN:-}" ]; then
+            echo "::error::Missing repository secret PUREFLUTTER_REPO_TOKEN. It must have read access to meshik/pureflutter."
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${PUREFLUTTER_REPO_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - name: Verify shared git dependency access
+        shell: bash
+        run: git ls-remote https://github.com/meshik/pureflutter.git HEAD >/dev/null
 
       - name: Install dependencies
         run: flutter pub get
