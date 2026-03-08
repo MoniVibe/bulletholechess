@@ -50,58 +50,93 @@ class _ChessGameScreenState extends State<ChessGameScreen> {
         : 'Live multiplayer with synchronized cooldown windows.';
 
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        child: Row(
-          children: <Widget>[
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: colorScheme.primary.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Icon(
-                  Icons.sports_esports_rounded,
-                  color: colorScheme.primary,
-                  size: 24,
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isCompact = constraints.maxWidth < 560;
+          final titleStyle =
+              (isCompact
+                      ? Theme.of(context).textTheme.titleMedium
+                      : Theme.of(context).textTheme.titleLarge)
+                  ?.copyWith(fontWeight: FontWeight.w800);
+
+          final modeSwitch = CompactModeSwitch(
+            key: const ValueKey<String>('chess_mode_switch'),
+            onlineSelected: _mode == _ChessMode.online,
+            onChanged: (online) {
+              UiSfx.tap();
+              setState(() {
+                _mode = online ? _ChessMode.online : _ChessMode.vsAi;
+              });
+            },
+          );
+
+          if (isCompact) {
+            // Mobile-first compact header: keep mode switching visible while
+            // reducing vertical footprint and avoiding long wrapped subtitles.
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              child: Row(
                 children: <Widget>[
-                  Text(
-                    _mode == _ChessMode.vsAi ? 'Chess Vs AI' : 'Chess Online',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
+                  Expanded(
+                    child: Text(
+                      _mode == _ChessMode.vsAi ? 'Chess Vs AI' : 'Chess Online',
+                      style: titleStyle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurface.withValues(alpha: 0.8),
-                    ),
-                  ),
+                  const SizedBox(width: 8),
+                  modeSwitch,
                 ],
               ),
+            );
+          }
+
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: <Widget>[
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: colorScheme.primary.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Icon(
+                      Icons.sports_esports_rounded,
+                      color: colorScheme.primary,
+                      size: 24,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        _mode == _ChessMode.vsAi
+                            ? 'Chess Vs AI'
+                            : 'Chess Online',
+                        style: titleStyle,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurface.withValues(alpha: 0.8),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                modeSwitch,
+              ],
             ),
-            const SizedBox(width: 8),
-            CompactModeSwitch(
-              key: const ValueKey<String>('chess_mode_switch'),
-              onlineSelected: _mode == _ChessMode.online,
-              onChanged: (online) {
-                UiSfx.tap();
-                setState(() {
-                  _mode = online ? _ChessMode.online : _ChessMode.vsAi;
-                });
-              },
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

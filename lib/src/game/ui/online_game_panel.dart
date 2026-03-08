@@ -350,16 +350,6 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                 ),
               ),
               const SizedBox(height: 10),
-              _buildTimingHud(
-                isMatchActive: _controller.isMatchActive,
-                timerHasStarted: timerHasStarted,
-                activeWindowColor: activeWindowColor(),
-                isPlayerWindow:
-                    activeWindowColor() != null &&
-                    activeWindowColor() == _controller.myColor,
-                remaining: activeWindowRemaining(),
-              ),
-              const SizedBox(height: 10),
               Expanded(
                 child: Center(
                   child: LayoutBuilder(
@@ -738,73 +728,6 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
     final halfSteps = (ms / 500).ceil();
     final halfSecondValue = halfSteps / 2;
     return '${halfSecondValue.toStringAsFixed(1)}s';
-  }
-
-  Widget _buildTimingHud({
-    required bool isMatchActive,
-    required bool timerHasStarted,
-    required String? activeWindowColor,
-    required bool isPlayerWindow,
-    required Duration remaining,
-  }) {
-    if (!isMatchActive) {
-      return const SizedBox.shrink();
-    }
-
-    final title = !timerHasStarted
-        ? 'Opening: White moves with no timer'
-        : (activeWindowColor == null
-              ? 'Both sides unlocked'
-              : (isPlayerWindow
-                    ? 'Your timer is running'
-                    : '${activeWindowColor == 'w' ? 'White' : 'Black'} timer is running'));
-    final subtitle = !timerHasStarted
-        ? 'After White moves, Black timer starts.'
-        : (activeWindowColor == null
-              ? 'First mover takes initiative.'
-              : '${_formatDuration(remaining)} remaining');
-    final accent = !timerHasStarted
-        ? const Color(0xFF607D8B)
-        : (isPlayerWindow ? const Color(0xFF2E7D32) : const Color(0xFF546E7A));
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        color: const Color(0xF2FFFFFF),
-        border: Border.all(color: accent.withValues(alpha: 0.45)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-        child: Row(
-          children: [
-            Icon(Icons.schedule, size: 18, color: accent),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
-                  ),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.black.withValues(alpha: 0.7),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   bool _isOnlineCheckmate() {

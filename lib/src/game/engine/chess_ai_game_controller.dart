@@ -120,7 +120,7 @@ class ChessAiGameController extends ChangeNotifier {
     final remaining = cooldownRemaining(_playerColor);
     if (hasQueuedMove) {
       if (remaining.inMilliseconds > 0) {
-        return 'Queued $queuedMoveLabel (${ChessRules.formatDuration(remaining)}).';
+        return 'Queued $queuedMoveLabel (${_formatStatusDuration(remaining)}).';
       }
       return 'Queued $queuedMoveLabel. Executing...';
     }
@@ -140,7 +140,7 @@ class ChessAiGameController extends ChangeNotifier {
     if (activeWindowColor != null) {
       final isPlayerWindow = activeWindowColor == _playerColor;
       final sideLabel = activeWindowColor == 'w' ? 'White' : 'Black';
-      final formatted = ChessRules.formatDuration(activeWindowRemaining);
+      final formatted = _formatStatusDuration(activeWindowRemaining);
       if (isPlayerWindow) {
         return 'Your timer is running ($formatted). Move now.';
       }
@@ -151,6 +151,16 @@ class ChessAiGameController extends ChangeNotifier {
       return 'Both sides unlocked. AI is planning.';
     }
     return 'Both sides unlocked. First move takes initiative.';
+  }
+
+  static String _formatStatusDuration(Duration duration) {
+    final ms = duration.inMilliseconds;
+    if (ms <= 0) {
+      return '0.0s';
+    }
+    final halfSteps = (ms / 500).ceil();
+    final halfSecondValue = halfSteps / 2;
+    return '${halfSecondValue.toStringAsFixed(1)}s';
   }
 
   void startNewGame({required bool playerAsWhite, Duration? cooldownDuration}) {

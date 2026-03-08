@@ -752,6 +752,16 @@ class OnlineGameController extends ChangeNotifier {
   }
 
   @override
+  void notifyListeners() {
+    // Async transport callbacks can still arrive briefly during teardown.
+    // Ignore notifications once disposed to avoid use-after-dispose crashes.
+    if (_disposed) {
+      return;
+    }
+    super.notifyListeners();
+  }
+
+  @override
   void dispose() {
     _disposed = true;
     _ticker.cancel();

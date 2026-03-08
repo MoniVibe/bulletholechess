@@ -28,9 +28,10 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
   bool _menuOpen = true;
   String _selectedBoardSkinId = SkinCatalog.defaultChessBoardSkinId;
   String _selectedPlayerPieceSkinId = SkinCatalog.defaultChessPieceSkinId;
-  bool _playerAsWhite = true;
+  _PlayAsChoice _playAsChoice = _PlayAsChoice.white;
   int _selectedCooldownSeconds = 3;
   TimeBarOrientation _timeBarOrientation = TimeBarOrientation.horizontal;
+  final math.Random _uiRandom = math.Random();
 
   @override
   void initState() {
@@ -144,21 +145,25 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                 ),
                 child: Column(
                   children: [
-                    DropdownButtonFormField<bool>(
-                      initialValue: _playerAsWhite,
+                    DropdownButtonFormField<_PlayAsChoice>(
+                      initialValue: _playAsChoice,
                       decoration: const InputDecoration(
                         labelText: 'Play As',
                         border: OutlineInputBorder(),
                         isDense: true,
                       ),
-                      items: const <DropdownMenuItem<bool>>[
-                        DropdownMenuItem<bool>(
-                          value: true,
+                      items: const <DropdownMenuItem<_PlayAsChoice>>[
+                        DropdownMenuItem<_PlayAsChoice>(
+                          value: _PlayAsChoice.white,
                           child: Text('White'),
                         ),
-                        DropdownMenuItem<bool>(
-                          value: false,
+                        DropdownMenuItem<_PlayAsChoice>(
+                          value: _PlayAsChoice.black,
                           child: Text('Black'),
+                        ),
+                        DropdownMenuItem<_PlayAsChoice>(
+                          value: _PlayAsChoice.random,
+                          child: Text('Random'),
                         ),
                       ],
                       onChanged: (value) {
@@ -166,7 +171,7 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                           return;
                         }
                         setState(() {
-                          _playerAsWhite = value;
+                          _playAsChoice = value;
                         });
                       },
                     ),
@@ -267,7 +272,7 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                         key: const ValueKey<String>('chess_ai_new_game'),
                         onPressed: () {
                           _controller.startNewGame(
-                            playerAsWhite: _playerAsWhite,
+                            playerAsWhite: _resolvePlayerAsWhite(),
                             cooldownDuration: Duration(
                               seconds: _selectedCooldownSeconds,
                             ),
@@ -283,16 +288,6 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 10),
-              _buildTimingHud(
-                hasActiveGame: hasActiveGame,
-                timerHasStarted: timerHasStarted,
-                activeWindowColor: activeWindowColor(),
-                isPlayerWindow:
-                    activeWindowColor() != null &&
-                    activeWindowColor() == _controller.playerColor,
-                remaining: activeWindowRemaining(),
               ),
               const SizedBox(height: 10),
               Expanded(
@@ -347,7 +342,7 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                                     actionLabel: 'New Game',
                                     onAction: () {
                                       _controller.startNewGame(
-                                        playerAsWhite: _playerAsWhite,
+                                        playerAsWhite: _resolvePlayerAsWhite(),
                                         cooldownDuration: Duration(
                                           seconds: _selectedCooldownSeconds,
                                         ),
@@ -360,7 +355,7 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                                   child: _buildStartOverlay(
                                     onStart: () {
                                       _controller.startNewGame(
-                                        playerAsWhite: _playerAsWhite,
+                                        playerAsWhite: _resolvePlayerAsWhite(),
                                         cooldownDuration: Duration(
                                           seconds: _selectedCooldownSeconds,
                                         ),
@@ -575,29 +570,6 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
               ),
               const SizedBox(height: 10),
               Card(
-                color: const Color(0xFFFFF2F2),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Note:',
-                        style: TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _controller.feedback ?? '-',
-                          style: const TextStyle(color: Color(0xFF8B2323)),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Card(
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Row(
@@ -658,71 +630,13 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
     return _controller.statusText;
   }
 
-  Widget _buildTimingHud({
-    required bool hasActiveGame,
-    required bool timerHasStarted,
-    required String? activeWindowColor,
-    required bool isPlayerWindow,
-    required Duration remaining,
-  }) {
-    if (!hasActiveGame) {
-      return const SizedBox.shrink();
-    }
-
-    final title = !timerHasStarted
-        ? 'Opening: White moves with no timer'
-        : (activeWindowColor == null
-              ? 'Both sides unlocked'
-              : (isPlayerWindow
-                    ? 'Your timer is running'
-                    : '${activeWindowColor == 'w' ? 'White' : 'Black'} timer is running'));
-    final subtitle = !timerHasStarted
-        ? 'After White moves, Black timer starts.'
-        : (activeWindowColor == null
-              ? 'First mover takes initiative.'
-              : '${_formatDuration(remaining)} remaining');
-    final accent = !timerHasStarted
-        ? const Color(0xFF607D8B)
-        : (isPlayerWindow ? const Color(0xFF2E7D32) : const Color(0xFF546E7A));
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        color: const Color(0xF2FFFFFF),
-        border: Border.all(color: accent.withValues(alpha: 0.45)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-        child: Row(
-          children: [
-            Icon(Icons.schedule, size: 18, color: accent),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
-                  ),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.black.withValues(alpha: 0.7),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  bool _resolvePlayerAsWhite() {
+    return switch (_playAsChoice) {
+      _PlayAsChoice.white => true,
+      _PlayAsChoice.black => false,
+      // Resolve random only when starting a game so the dropdown remains stable.
+      _PlayAsChoice.random => _uiRandom.nextBool(),
+    };
   }
 
   Widget _buildVictoryOverlay({
@@ -851,3 +765,5 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
         .toList(growable: false);
   }
 }
+
+enum _PlayAsChoice { white, black, random }
