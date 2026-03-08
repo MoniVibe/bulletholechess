@@ -37,6 +37,8 @@ jobs:
           channel: stable
       - name: Verify shared dependency pin
         run: dart tool/verify_shared_dependency.dart
+      - name: Configure git auth for pub git dependencies
+        run: git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
       - name: Install dependencies
         run: flutter pub get
       - name: Build Flutter web
