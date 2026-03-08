@@ -85,9 +85,12 @@ class _ChessNetworkAiSession {
   String? _fen;
   int _sequence = 0;
   int _clockOffsetMs = 0;
+  DateTime? _lastStateAt;
   bool _moveInFlight = false;
   int _nextClientMoveId = 1;
   int? _inFlightClientMoveId;
+  String? _inFlightFrom;
+  String? _inFlightTo;
   int? _lastAttemptSequence;
   final Map<String, int> _cooldownEndsAt = <String, int>{'w': 0, 'b': 0};
   Map<String, dynamic>? _forfeitLock;
@@ -175,6 +178,8 @@ class _ChessNetworkAiSession {
       case 'error':
         _moveInFlight = false;
         _inFlightClientMoveId = null;
+        _inFlightFrom = null;
+        _inFlightTo = null;
         _updateClockOffset(message['serverNow']);
         _updateCooldownSnapshot(message['cooldownEndsAt']);
         _forfeitLock = _readMap(message['forfeitLock']) ?? _forfeitLock;
@@ -216,6 +221,7 @@ class _ChessNetworkAiSession {
     _sequence = sequence;
     _status = message['status'] as String? ?? _status;
     _result = message['result'] as String?;
+    _lastStateAt = DateTime.now();
     final fen = message['fen'] as String?;
     if (fen != null && fen.trim().isNotEmpty) {
       _fen = fen;
@@ -229,9 +235,18 @@ class _ChessNetworkAiSession {
       final ackMoveId = MultiplayerClientUtils.readInt(
         lastMove['clientMoveId'],
       );
-      if (ackMoveId != null && ackMoveId == _inFlightClientMoveId) {
+      final ackColor = (lastMove['color'] as String?)?.trim().toLowerCase();
+      final ackFrom = (lastMove['from'] as String?)?.trim().toLowerCase();
+      final ackTo = (lastMove['to'] as String?)?.trim().toLowerCase();
+      final ackMatchesMoveId = ackMoveId != null && ackMoveId == _inFlightClientMoveId;
+      final ackMatchesSender = ackColor != null
+          ? ackColor == _myColor
+          : (ackFrom == _inFlightFrom && ackTo == _inFlightTo);
+      if (ackMatchesMoveId && ackMatchesSender) {
         _moveInFlight = false;
         _inFlightClientMoveId = null;
+        _inFlightFrom = null;
+        _inFlightTo = null;
         logger.log(<String, Object?>{
           'event': 'move_acked',
           'at': DateTime.now().toIso8601String(),
@@ -284,6 +299,12 @@ class _ChessNetworkAiSession {
     if (myColor == null || fen == null || fen.trim().isEmpty) {
       return;
     }
+    final lastStateAt = _lastStateAt;
+    if (lastStateAt == null ||
+        DateTime.now().difference(lastStateAt).inMilliseconds <
+            config.settleMs) {
+      return;
+    }
     if (_isBlockedByForfeitLock(myColor)) {
       return;
     }
@@ -294,9 +315,11 @@ class _ChessNetworkAiSession {
     final game = chess.Chess();
     final loaded = game.load(fen);
     if (!loaded) {
+      _lastAttemptSequence = _sequence;
       logger.log(<String, Object?>{
         'event': 'state_load_failed',
         'at': DateTime.now().toIso8601String(),
+        'sequence': _sequence,
         'fen': fen,
       });
       return;
@@ -324,6 +347,7 @@ class _ChessNetworkAiSession {
       'promotion': move.promotion,
       'source': 'manual',
       'clientMoveId': clientMoveId,
+      'expectedSequence': _sequence,
     });
     if (!sent) {
       return;
@@ -332,6 +356,8 @@ class _ChessNetworkAiSession {
     _lastAttemptSequence = _sequence;
     _moveInFlight = true;
     _inFlightClientMoveId = clientMoveId;
+    _inFlightFrom = move.from;
+    _inFlightTo = move.to;
     logger.log(<String, Object?>{
       'event': 'move_sent',
       'at': DateTime.now().toIso8601String(),
@@ -455,6 +481,7 @@ class _Config {
     required this.cooldownSeconds,
     required this.seed,
     required this.pollMs,
+    required this.settleMs,
     required this.exitOnGameOver,
     required this.logFilePath,
   });
@@ -464,6 +491,7 @@ class _Config {
   final int cooldownSeconds;
   final int seed;
   final int pollMs;
+  final int settleMs;
   final bool exitOnGameOver;
   final String logFilePath;
 
@@ -473,6 +501,7 @@ class _Config {
     var cooldownSeconds = 3;
     var seed = DateTime.now().millisecondsSinceEpoch & 0x7fffffff;
     var pollMs = 120;
+    var settleMs = 250;
     var exitOnGameOver = true;
     String? logFilePath;
 
@@ -499,6 +528,10 @@ class _Config {
         pollMs = int.parse(arg.substring('--poll-ms='.length));
         continue;
       }
+      if (arg.startsWith('--settle-ms=')) {
+        settleMs = int.parse(arg.substring('--settle-ms='.length));
+        continue;
+      }
       if (arg == '--stay-alive') {
         exitOnGameOver = false;
         continue;
@@ -522,6 +555,9 @@ class _Config {
     if (pollMs <= 0) {
       throw ArgumentError('--poll-ms must be > 0');
     }
+    if (settleMs < 0) {
+      throw ArgumentError('--settle-ms must be >= 0');
+    }
 
     logFilePath ??=
         'debug/network-ai-chess-${displayName.toLowerCase()}-${_timestamp()}.jsonl';
@@ -532,6 +568,7 @@ class _Config {
       cooldownSeconds: cooldownSeconds,
       seed: seed,
       pollMs: pollMs,
+      settleMs: settleMs,
       exitOnGameOver: exitOnGameOver,
       logFilePath: logFilePath,
     );
@@ -554,6 +591,7 @@ Never _printUsageAndExit() {
     'Usage: dart run tool/network_ai_duel_client.dart '
     '[--backend-url=http://localhost:8080] [--name=ChessAI-A] '
     '[--cooldown-seconds=0] [--seed=123] [--poll-ms=120] '
+    '[--settle-ms=250] '
     '[--log-file=debug/chess-network.jsonl] [--stay-alive]',
   );
   exit(0);

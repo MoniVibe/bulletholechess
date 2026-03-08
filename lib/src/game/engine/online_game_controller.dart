@@ -12,6 +12,10 @@ import 'chess_rules.dart';
 class OnlineGameController extends ChangeNotifier {
   static const String _defaultPromotion = ChessRules.defaultPromotion;
   static const String _defaultPieceSkinId = 'chess_classic';
+  static const bool _disableQueuedInput = bool.fromEnvironment(
+    'CHESS_DISABLE_QUEUED_INPUT',
+    defaultValue: false,
+  );
   static const Duration _defaultHealthTimeout = Duration(seconds: 5);
   static const Duration _defaultWakeTimeout = Duration(seconds: 15);
   static const int _maxDebugLogEntries = 400;
@@ -579,7 +583,7 @@ class OnlineGameController extends ChangeNotifier {
       final chosenPromotion =
           legalMove['promotion'] as String? ?? _defaultPromotion;
       final onCooldown = cooldownRemaining(color).inMilliseconds > 0;
-      if (onCooldown) {
+      if (onCooldown && !_disableQueuedInput) {
         _logEvent(
           'queue_move',
           details: <String, Object?>{
@@ -592,6 +596,13 @@ class OnlineGameController extends ChangeNotifier {
         _queuePlayerMove(from: from, to: square, promotion: chosenPromotion);
         _clearSelection();
         _feedback = null;
+        notifyListeners();
+        return;
+      }
+      if (onCooldown && _disableQueuedInput) {
+        _feedback =
+            'Cooling down (${ChessRules.formatDuration(cooldownRemaining(color))}).';
+        _clearSelection();
         notifyListeners();
         return;
       }
@@ -623,7 +634,7 @@ class OnlineGameController extends ChangeNotifier {
 
     if (isOwnPiece) {
       final onCooldown = cooldownRemaining(color).inMilliseconds > 0;
-      if (onCooldown && _selectedSquare != square) {
+      if (onCooldown && !_disableQueuedInput && _selectedSquare != square) {
         // Allow speculative queueing (e.g. predicted recapture) while cooling down.
         _logEvent(
           'queue_move',
@@ -808,6 +819,7 @@ class OnlineGameController extends ChangeNotifier {
       'from': from,
       'to': to,
       'clientMoveId': moveId,
+      'expectedSequence': _sequence,
       'source': source,
       'queueToken': queueToken,
     };
@@ -826,6 +838,7 @@ class OnlineGameController extends ChangeNotifier {
       'send_move_payload',
       details: <String, Object?>{
         'clientMoveId': moveId,
+        'expectedSequence': _sequence,
         'source': source,
         'queueToken': queueToken,
         'from': from,
@@ -1403,11 +1416,15 @@ class OnlineGameController extends ChangeNotifier {
   }
 
   bool _isRetriableQueueError(String? code, String message) {
-    if (code == 'cooldown_active' || code == 'forfeit_waiting_release') {
+    if (code == 'cooldown_active' ||
+        code == 'forfeit_waiting_release' ||
+        code == 'stale_state') {
       return true;
     }
     final lowered = message.toLowerCase();
-    return lowered.contains('cooldown') || lowered.contains('forfeit');
+    return lowered.contains('cooldown') ||
+        lowered.contains('forfeit') ||
+        lowered.contains('stale');
   }
 
   bool _isBlockedByForfeitLock(String color, {bool resolveTimeout = true}) {

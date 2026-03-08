@@ -1,11 +1,11 @@
 import 'dart:math' as math;
 
+import 'package:bullethole_shared/bullethole_shared.dart';
 import 'package:flutter/material.dart';
 
 import '../engine/local_game_controller.dart';
+import 'app_assets.dart';
 import 'chess_board_view.dart';
-import 'cooldown_meter.dart';
-import 'mode_switch.dart';
 import 'online_game_panel.dart';
 
 enum _GameMode { local, online }
@@ -268,6 +268,14 @@ class _GameScreenState extends State<GameScreen> {
                             label: topColor == 'w' ? 'W' : 'B',
                             remaining: topRemaining,
                             total: _controller.cooldownDuration,
+                            horizontalPrimaryAssetPath:
+                                AppAssets.horizontalTimeBarAccent,
+                            horizontalFallbackAssetPath:
+                                AppAssets.horizontalTimeBar,
+                            verticalPrimaryAssetPath:
+                                AppAssets.verticalTimeBarAccent,
+                            verticalFallbackAssetPath:
+                                AppAssets.verticalTimeBar,
                             activeColor: topActiveColor,
                             isPlayerSide: topIsPlayer,
                             timeLabel: _controller.hasActiveGame
@@ -338,6 +346,14 @@ class _GameScreenState extends State<GameScreen> {
                             label: bottomColor == 'w' ? 'W' : 'B',
                             remaining: bottomRemaining,
                             total: _controller.cooldownDuration,
+                            horizontalPrimaryAssetPath:
+                                AppAssets.horizontalTimeBarAccent,
+                            horizontalFallbackAssetPath:
+                                AppAssets.horizontalTimeBar,
+                            verticalPrimaryAssetPath:
+                                AppAssets.verticalTimeBarAccent,
+                            verticalFallbackAssetPath:
+                                AppAssets.verticalTimeBar,
                             activeColor: bottomActiveColor,
                             isPlayerSide: bottomIsPlayer,
                             timeLabel: _controller.hasActiveGame

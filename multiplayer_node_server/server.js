@@ -402,6 +402,7 @@ function handleSocketMessage({ match, color, socket, payload }) {
       const attemptedTo = sanitizeSquare(payload.to);
       const attemptedPromotion = sanitizePromotion(payload.promotion);
       const clientMoveId = sanitizeMoveId(payload.clientMoveId);
+      const expectedSequence = sanitizeSequence(payload.expectedSequence);
       const source = sanitizeMoveSource(payload.source);
       const queueToken = sanitizeMoveId(payload.queueToken);
       const player = playerForColor(match, color);
@@ -414,6 +415,7 @@ function handleSocketMessage({ match, color, socket, payload }) {
         to: attemptedTo,
         promotion: attemptedPromotion,
         clientMoveId,
+        expectedSequence,
         source,
         queueToken,
       });
@@ -475,6 +477,27 @@ function handleSocketMessage({ match, color, socket, payload }) {
         });
         return;
       }
+      if (expectedSequence !== null && expectedSequence !== match.sequence) {
+        logEvent('move_rejected', {
+          matchId: match.matchId,
+          color,
+          playerId,
+          reason: 'stale_state',
+          expectedSequence,
+          currentSequence: match.sequence,
+        });
+        sendJson(socket, {
+          type: 'error',
+          code: 'stale_state',
+          message: 'Client state is stale. Wait for latest board update.',
+          expectedSequence,
+          currentSequence: match.sequence,
+          cooldownEndsAt: match.cooldownEndsAt,
+          forfeitLock: serializeForfeitLock(match.forfeitLock),
+          serverNow: Date.now(),
+        });
+        return;
+      }
       const readyAt = match.cooldownEndsAt[color] || 0;
       if (now < readyAt) {
         logEvent('move_rejected', {
@@ -528,9 +551,8 @@ function handleSocketMessage({ match, color, socket, payload }) {
         return;
       }
 
-      const board = boardPiecesFromFen(match.game.fen());
-      const fromPiece = board[from] || null;
-      const toPiece = board[to] || null;
+      const fromPiece = match.game.get(from);
+      const toPiece = match.game.get(to);
       if (!fromPiece) {
         logEvent('move_rejected', {
           matchId: match.matchId,
@@ -550,7 +572,7 @@ function handleSocketMessage({ match, color, socket, payload }) {
         });
         return;
       }
-      if (!pieceBelongsToColor(fromPiece, color)) {
+      if (fromPiece.color !== color) {
         logEvent('move_rejected', {
           matchId: match.matchId,
           color,
@@ -561,7 +583,8 @@ function handleSocketMessage({ match, color, socket, payload }) {
           reason: 'piece_not_owned',
           from,
           to,
-          fromPiece,
+          fromPieceType: fromPiece.type,
+          fromPieceColor: fromPiece.color,
         });
         sendJson(socket, {
           type: 'error',
@@ -570,7 +593,7 @@ function handleSocketMessage({ match, color, socket, payload }) {
         });
         return;
       }
-      if (toPiece && pieceBelongsToColor(toPiece, color)) {
+      if (toPiece && toPiece.color === color) {
         logEvent('move_rejected', {
           matchId: match.matchId,
           color,
@@ -581,7 +604,8 @@ function handleSocketMessage({ match, color, socket, payload }) {
           reason: 'destination_occupied_by_own_piece',
           from,
           to,
-          toPiece,
+          toPieceType: toPiece.type,
+          toPieceColor: toPiece.color,
         });
         sendJson(socket, {
           type: 'error',
@@ -617,9 +641,7 @@ function handleSocketMessage({ match, color, socket, payload }) {
 
       const nominalTurnColor = match.game.turn();
       const movePayload = movePayloadFromLegalMove(legalMove);
-      const moved = withColorTurn(match.game, color, () =>
-        match.game.move(movePayload),
-      );
+      const moved = applyMoveAsColor(match.game, color, movePayload);
       if (!moved) {
         logEvent('move_rejected', {
           matchId: match.matchId,
@@ -675,6 +697,7 @@ function handleSocketMessage({ match, color, socket, payload }) {
         from,
         to,
         promotion,
+        color,
         clientMoveId,
         source,
         queueToken,
@@ -1110,43 +1133,63 @@ function getTerminalStatus(game) {
 }
 
 function isCheckmateForColor(game, color) {
-  return withColorTurn(game, color, () => game.isCheckmate());
+  const gameForColor = cloneGameWithTurn(game, color);
+  return gameForColor.isCheckmate();
 }
 
 function isInCheckForColor(game, color) {
-  return withColorTurn(game, color, () => game.isCheck());
+  const gameForColor = cloneGameWithTurn(game, color);
+  return gameForColor.isCheck();
 }
 
 function hasAnyLegalMoveForColor(game, color) {
-  return withColorTurn(game, color, () => game.moves().length > 0);
+  const gameForColor = cloneGameWithTurn(game, color);
+  return gameForColor.moves().length > 0;
 }
 
 function findValidatedLegalMove({ game, from, to, promotion, color }) {
-  return withColorTurn(game, color, () => {
-    const legalMoves = game.moves({ verbose: true });
-    for (const move of legalMoves) {
-      if (move.from !== from || move.to !== to) {
-        continue;
-      }
-      if (!move.promotion) {
-        return move;
-      }
-      if (move.promotion === promotion) {
-        return move;
-      }
+  const gameForColor = cloneGameWithTurn(game, color);
+  const legalMoves = gameForColor.moves({ verbose: true });
+  for (const move of legalMoves) {
+    if (move.from !== from || move.to !== to) {
+      continue;
     }
-    return null;
-  });
+    if (!move.promotion) {
+      return move;
+    }
+    if (move.promotion === promotion) {
+      return move;
+    }
+  }
+  return null;
 }
 
-function withColorTurn(game, color, callback) {
-  const previousTurn = game.turn();
-  game._turn = color;
+function applyMoveAsColor(game, color, movePayload) {
+  const gameForColor = cloneGameWithTurn(game, color);
+  let moved = null;
   try {
-    return callback();
-  } finally {
-    game._turn = previousTurn;
+    moved = gameForColor.move(movePayload);
+  } catch (_error) {
+    return null;
   }
+  if (!moved) {
+    return null;
+  }
+  try {
+    game.load(gameForColor.fen());
+  } catch (_error) {
+    return null;
+  }
+  return moved;
+}
+
+function cloneGameWithTurn(game, color) {
+  const fen = game.fen();
+  const parts = fen.split(' ');
+  if (parts.length >= 2) {
+    parts[1] = color;
+  }
+  return new Chess(parts.join(' '));
 }
 
 function sanitizeName(value) {
@@ -1210,6 +1253,14 @@ function sanitizeMoveId(value) {
   return parsed;
 }
 
+function sanitizeSequence(value) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+  return parsed;
+}
+
 function sanitizeMoveSource(value) {
   if (value === 'manual' || value === 'queued') {
     return value;
@@ -1230,43 +1281,6 @@ function sanitizePieceSkinId(value) {
     return null;
   }
   return normalized;
-}
-
-function pieceBelongsToColor(piece, color) {
-  if (typeof piece !== 'string' || piece.length === 0) {
-    return false;
-  }
-  const isWhitePiece = piece === piece.toUpperCase();
-  return color === 'w' ? isWhitePiece : !isWhitePiece;
-}
-
-function boardPiecesFromFen(fen) {
-  if (typeof fen !== 'string' || fen.length === 0) {
-    return {};
-  }
-  const files = 'abcdefgh';
-  const boardPart = fen.split(' ')[0];
-  const rows = boardPart.split('/');
-  const board = {};
-
-  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-    const row = rows[rowIndex];
-    let fileIndex = 0;
-    for (const symbol of row.split('')) {
-      const emptyCount = Number.parseInt(symbol, 10);
-      if (Number.isFinite(emptyCount)) {
-        fileIndex += emptyCount;
-        continue;
-      }
-      if (fileIndex >= 0 && fileIndex < files.length) {
-        const square = `${files[fileIndex]}${8 - rowIndex}`;
-        board[square] = symbol;
-      }
-      fileIndex += 1;
-    }
-  }
-
-  return board;
 }
 
 function movePayloadFromLegalMove(move) {

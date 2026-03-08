@@ -1,0 +1,4 @@
+{
+  "APP_ENV": "dev",
+  "DEFAULT_BACKEND_URL": "http://localhost:8080"
+}

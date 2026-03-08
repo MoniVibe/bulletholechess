@@ -1,0 +1,4 @@
+Sashite Chess Assets
+Source: https://sashite.dev/assets/chess
+License: CC0 1.0 Universal
+URL: https://creativecommons.org/publicdomain/zero/1.0/

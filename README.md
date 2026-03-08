@@ -35,6 +35,36 @@ flutter pub get
 flutter run
 ```
 
+## Runtime environment config (ship-safe defaults)
+
+Backend URL and environment now come from `--dart-define` values.
+Use the checked-in env files:
+
+- `config/env/dev.json`
+- `config/env/staging.json`
+- `config/env/production.json`
+
+Examples:
+
+```bash
+flutter run --dart-define-from-file=config/env/dev.json
+flutter run --dart-define-from-file=config/env/staging.json
+flutter run --dart-define-from-file=config/env/production.json
+```
+
+Release build example:
+
+```bash
+flutter build apk --release --dart-define-from-file=config/env/production.json
+```
+
+Available keys:
+- `APP_ENV` (`dev`, `staging`, `production`)
+- `DEFAULT_BACKEND_URL` (preferred explicit backend URL)
+- `DEFAULT_BACKEND_URL_DEV`
+- `DEFAULT_BACKEND_URL_STAGING`
+- `DEFAULT_BACKEND_URL_PROD`
+
 ### Visual asset prep (new art drops)
 
 When replacing board/piece/time-bar images, preprocess them into transparent
@@ -300,3 +330,29 @@ For production scale and reliability you should add:
 - metrics/rate limits/abuse controls
 
 `Node.js for matchmaking` is a good choice, but not mandatory. It is a practical fit due to mature WebSocket ecosystem, I/O performance, and easy horizontal scaling with Redis.
+
+## UI polish references and assets
+
+This branch starts UI modernization with stronger readability, clearer state feedback, and better control affordances.
+
+Design references:
+- Nielsen Norman Group: 10 usability heuristics  
+  https://www.nngroup.com/articles/ten-usability-heuristics/
+- WCAG 2.2 contrast and non-text contrast guidance  
+  https://www.w3.org/TR/WCAG22/
+- Android accessibility touch target guidance (48dp)  
+  https://support.google.com/accessibility/android/answer/7101858
+- Game Accessibility Guidelines (basic checklist)  
+  https://gameaccessibilityguidelines.com/basic/
+
+Audio assets:
+- Kenney Interface Sounds (CC0)  
+  https://kenney.nl/assets/interface-sounds  
+  https://github.com/Calinou/kenney-interface-sounds
+- Included subset is under `assets/audio/ui/` with license file `LICENSE-Kenney-CC0.txt`.
+
+Chess board/piece assets:
+- Sashite Chess Assets (CC0)  
+  https://sashite.dev/assets/chess
+- Included CC0 subset is under `assets/generated/ui/board_sashite.png` and
+  `assets/generated/pieces/sashite/`.

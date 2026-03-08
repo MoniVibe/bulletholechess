@@ -6,10 +6,14 @@
 class AppAssets {
   static const double chessBoardPlayableInsetRatio = 120 / 1024;
   static const double chessBoardPlayableSizeRatio = 784 / 1024;
+  static const double chessBoardFullInsetRatio = 0;
+  static const double chessBoardFullSizeRatio = 1;
 
   static const String appBackground = 'assets/generated/ui/background.png';
   static const String chessBoardClassic = 'assets/generated/ui/board.png';
   static const String chessBoardRed = 'assets/Boardalt.png.png';
+  static const String chessBoardSashite =
+      'assets/generated/ui/board_sashite.png';
   static const String horizontalTimeBar =
       'assets/generated/ui/time_bar_horizontal.png';
   static const String verticalTimeBar =
@@ -54,6 +58,22 @@ class AppAssets {
     'b': 'assets/generated/pieces/rB.png',
     'q': 'assets/generated/pieces/rQ.png',
     'k': 'assets/generated/pieces/rK.png',
+  };
+
+  /// CC0 pieces sourced from https://sashite.dev/assets/chess.
+  static const Map<String, String> sashitePieceSprites = <String, String>{
+    'P': 'assets/generated/pieces/sashite/wP.png',
+    'R': 'assets/generated/pieces/sashite/wR.png',
+    'N': 'assets/generated/pieces/sashite/wN.png',
+    'B': 'assets/generated/pieces/sashite/wB.png',
+    'Q': 'assets/generated/pieces/sashite/wQ.png',
+    'K': 'assets/generated/pieces/sashite/wK.png',
+    'p': 'assets/generated/pieces/sashite/bP.png',
+    'r': 'assets/generated/pieces/sashite/bR.png',
+    'n': 'assets/generated/pieces/sashite/bN.png',
+    'b': 'assets/generated/pieces/sashite/bB.png',
+    'q': 'assets/generated/pieces/sashite/bQ.png',
+    'k': 'assets/generated/pieces/sashite/bK.png',
   };
 
   /// Backward-compatible alias for default board rendering.

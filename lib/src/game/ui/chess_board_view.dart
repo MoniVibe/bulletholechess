@@ -14,6 +14,10 @@ class ChessBoardView extends StatelessWidget {
     this.playableSizeRatio = AppAssets.chessBoardPlayableSizeRatio,
     this.whitePieceSprites = AppAssets.pieceSprites,
     this.blackPieceSprites = AppAssets.pieceSprites,
+    this.whitePieceScale = _legacyPieceVisualScale,
+    this.blackPieceScale = _legacyPieceVisualScale,
+    this.whitePieceYOffset = _legacyPieceVisualYOffset,
+    this.blackPieceYOffset = _legacyPieceVisualYOffset,
     this.invertWhitePieceColors = false,
     this.invertBlackPieceColors = false,
     this.selectedSquare,
@@ -39,6 +43,10 @@ class ChessBoardView extends StatelessWidget {
   final double playableSizeRatio;
   final Map<String, String> whitePieceSprites;
   final Map<String, String> blackPieceSprites;
+  final double whitePieceScale;
+  final double blackPieceScale;
+  final double whitePieceYOffset;
+  final double blackPieceYOffset;
   final bool invertWhitePieceColors;
   final bool invertBlackPieceColors;
   final String? selectedSquare;
@@ -57,7 +65,10 @@ class ChessBoardView extends StatelessWidget {
   final ValueChanged<String> onSquareTap;
 
   static const String _files = 'abcdefgh';
-  static const double _pieceVisualScale = 1.8;
+  static const double _legacyPieceVisualScale = 1.26;
+  static const double _legacyPieceVisualYOffset = -0.04;
+  static const double _pieceLiftPixels = 3.5;
+  static const double _pieceHeightBoostPixels = 2.0;
   static const TextStyle _pieceFallbackStyle = TextStyle(
     fontSize: 30,
     fontWeight: FontWeight.w700,
@@ -118,7 +129,6 @@ class ChessBoardView extends StatelessWidget {
                     itemBuilder: (context, index) {
                       final square = _squareForDisplayedCell(index);
                       final piece = pieces[square];
-                      final isDarkSquare = ((index ~/ 8) + (index % 8)).isOdd;
                       final isSelected = selectedSquare == square;
                       final isTarget = legalTargets.contains(square);
                       final isPrimaryMoveSquare =
@@ -159,6 +169,7 @@ class ChessBoardView extends StatelessWidget {
                             0xFF00BCD4,
                           ).withValues(alpha: 0.14),
                           child: Stack(
+                            clipBehavior: Clip.none,
                             children: <Widget>[
                               if (isSelected)
                                 Positioned.fill(
@@ -251,32 +262,42 @@ class ChessBoardView extends StatelessWidget {
                                         constraints.maxWidth,
                                         constraints.maxHeight,
                                       );
+                                      final pieceScale =
+                                          piece == piece.toUpperCase()
+                                          ? whitePieceScale
+                                          : blackPieceScale;
+                                      final pieceYOffset =
+                                          piece == piece.toUpperCase()
+                                          ? whitePieceYOffset
+                                          : blackPieceYOffset;
                                       final pieceSize =
-                                          squareSize * _pieceVisualScale;
-                                      return Center(
-                                        child: SizedBox(
-                                          width: pieceSize,
-                                          height: pieceSize,
-                                          child: _buildPieceSprite(piece),
+                                          squareSize *
+                                          pieceScale.clamp(0.5, 1.5);
+                                      return Transform.translate(
+                                        offset: Offset(
+                                          0,
+                                          squareSize *
+                                                  pieceYOffset.clamp(-0.4, 0.4) -
+                                              _pieceLiftPixels,
+                                        ),
+                                        child: OverflowBox(
+                                          alignment: Alignment.center,
+                                          minWidth: 0,
+                                          minHeight: 0,
+                                          maxWidth: pieceSize,
+                                          maxHeight:
+                                              pieceSize + _pieceHeightBoostPixels,
+                                          child: SizedBox(
+                                            width: pieceSize,
+                                            height:
+                                                pieceSize + _pieceHeightBoostPixels,
+                                            child: _buildPieceSprite(piece),
+                                          ),
                                         ),
                                       );
                                     },
                                   ),
                                 ),
-                              Positioned(
-                                right: 3,
-                                bottom: 1,
-                                child: Text(
-                                  square,
-                                  style: TextStyle(
-                                    fontSize: 8,
-                                    fontWeight: FontWeight.w600,
-                                    color: isDarkSquare
-                                        ? Colors.white.withValues(alpha: 0.74)
-                                        : Colors.black.withValues(alpha: 0.52),
-                                  ),
-                                ),
-                              ),
                             ],
                           ),
                         ),

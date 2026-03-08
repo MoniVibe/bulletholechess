@@ -19,6 +19,7 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
   static const Duration _aiTestingDelay = Duration(seconds: 3);
   static const List<int> _cooldownOptionsSeconds = <int>[2, 3, 5, 7, 10];
   static const Set<String> _ownedChessPieceSkinIds = <String>{
+    'chess_sashite_western',
     'chess_classic',
     'chess_red_pieces',
   };
@@ -324,6 +325,10 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                                 playableSizeRatio: boardSkin.playableSizeRatio,
                                 whitePieceSprites: whitePieceSkin.spriteMap,
                                 blackPieceSprites: blackPieceSkin.spriteMap,
+                                whitePieceScale: whitePieceSkin.pieceScale,
+                                blackPieceScale: blackPieceSkin.pieceScale,
+                                whitePieceYOffset: whitePieceSkin.pieceYOffset,
+                                blackPieceYOffset: blackPieceSkin.pieceYOffset,
                                 selectedSquare: _controller.selectedSquare,
                                 legalTargets: _controller.legalTargets,
                                 lastMoveFrom: _controller.playerLastMoveFrom,
@@ -731,65 +736,75 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
         color: Colors.black.withValues(alpha: 0.4),
         borderRadius: BorderRadius.circular(14),
       ),
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 360),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: const Color(0xEE111821),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0x66FFFFFF)),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 16,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.emoji_events_rounded,
-                      color: Color(0xFFFFD26A),
-                      size: 30,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 120 || constraints.maxHeight < 120) {
+            return const SizedBox.shrink();
+          }
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 360),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: const Color(0xEE111821),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0x66FFFFFF)),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      title,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 20,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 16,
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.emoji_events_rounded,
+                            color: Color(0xFFFFD26A),
+                            size: 30,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            title,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 20,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            subtitle,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Color(0xFFE2E8F0),
+                              fontSize: 13,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          FilledButton.icon(
+                            onPressed: onAction,
+                            icon: const AppAssetIcon(
+                              AppAssets.newGameIcon,
+                              fallbackIcon: Icons.refresh,
+                              size: 18,
+                            ),
+                            label: Text(actionLabel),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      subtitle,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Color(0xFFE2E8F0),
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    FilledButton.icon(
-                      onPressed: onAction,
-                      icon: const AppAssetIcon(
-                        AppAssets.newGameIcon,
-                        fallbackIcon: Icons.refresh,
-                        size: 18,
-                      ),
-                      label: Text(actionLabel),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
@@ -800,17 +815,27 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
         color: Colors.black.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(14),
       ),
-      child: Center(
-        child: FilledButton.icon(
-          key: const ValueKey<String>('chess_ai_start_new_game'),
-          onPressed: onStart,
-          icon: const AppAssetIcon(
-            AppAssets.newGameIcon,
-            fallbackIcon: Icons.play_arrow,
-            size: 18,
-          ),
-          label: const Text('Start New Game'),
-        ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 110 || constraints.maxHeight < 90) {
+            return const SizedBox.shrink();
+          }
+          return Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: FilledButton.icon(
+                key: const ValueKey<String>('chess_ai_start_new_game'),
+                onPressed: onStart,
+                icon: const AppAssetIcon(
+                  AppAssets.newGameIcon,
+                  fallbackIcon: Icons.play_arrow,
+                  size: 18,
+                ),
+                label: const Text('Start New Game'),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
