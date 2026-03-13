@@ -6,6 +6,7 @@ Maintainability:
 - Remove unnecessary and stale code.
 - Define variables for constants.
 - Refactor existing code you encounter to approach best practices. Refactor for DRY when applicable, in the file and across files.
+- Be wary of altering existing logic - don't break anything
 
 Reliability:
 - Design any tests you see fit and add them to the CI/CD, only if they are relevant long-term (not prone to change).
