@@ -8,7 +8,8 @@ class AppRuntimeConfig {
   );
   static const String _defaultBackendUrlOverride = String.fromEnvironment(
     'DEFAULT_BACKEND_URL',
-    defaultValue: '',
+    defaultValue:
+        'https://matchmaker.agreeableground-86a00183.eastus2.azurecontainerapps.io',
   );
   static const String _devBackendUrl = String.fromEnvironment(
     'DEFAULT_BACKEND_URL_DEV',
@@ -24,7 +25,8 @@ class AppRuntimeConfig {
   );
   static const String _releaseFallbackBackendUrl = String.fromEnvironment(
     'DEFAULT_BACKEND_URL_RELEASE_FALLBACK',
-    defaultValue: 'https://your-backend.example.com',
+    defaultValue:
+        'https://matchmaker.agreeableground-86a00183.eastus2.azurecontainerapps.io',
   );
 
   static String get appEnv => _normalizedAppEnv(_appEnv);

@@ -34,7 +34,6 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
   };
 
   late final OnlineGameController _controller;
-  late final TextEditingController _apiBaseController;
   late final TextEditingController _nameController;
 
   bool _connecting = false;
@@ -48,16 +47,12 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
   void initState() {
     super.initState();
     _controller = OnlineGameController();
-    _apiBaseController = TextEditingController(
-      text: AppRuntimeConfig.defaultBackendUrl,
-    );
     _nameController = TextEditingController(text: 'Player');
     _checkBackendHealth();
   }
 
   @override
   void dispose() {
-    _apiBaseController.dispose();
     _nameController.dispose();
     _controller.dispose();
     super.dispose();
@@ -157,17 +152,6 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                     : null,
                 child: Column(
                   children: [
-                    TextField(
-                      key: const ValueKey<String>('chess_online_backend_url'),
-                      controller: _apiBaseController,
-                      decoration: const InputDecoration(
-                        labelText: 'Backend URL',
-                        hintText: 'https://your-backend.example.com',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
                     TextField(
                       key: const ValueKey<String>('chess_online_display_name'),
                       controller: _nameController,
@@ -923,7 +907,7 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
 
     try {
       await _controller.findMatch(
-        apiBaseUrl: _apiBaseController.text,
+        apiBaseUrl: AppRuntimeConfig.defaultBackendUrl,
         displayName: _nameController.text,
         cooldownSeconds: _selectedCooldownSeconds,
       );
@@ -949,7 +933,9 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
       _backendActionInFlight = true;
     });
     try {
-      await _controller.checkBackendHealth(apiBaseUrl: _apiBaseController.text);
+      await _controller.checkBackendHealth(
+        apiBaseUrl: AppRuntimeConfig.defaultBackendUrl,
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -967,7 +953,9 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
       _backendActionInFlight = true;
     });
     try {
-      await _controller.wakeBackend(apiBaseUrl: _apiBaseController.text);
+      await _controller.wakeBackend(
+        apiBaseUrl: AppRuntimeConfig.defaultBackendUrl,
+      );
     } finally {
       if (mounted) {
         setState(() {

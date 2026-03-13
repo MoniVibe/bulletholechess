@@ -1545,15 +1545,15 @@ class OnlineGameController extends ChangeNotifier {
       return error.message;
     }
     if (error is SocketException) {
-      return 'Cannot reach backend (connection refused). Check Backend URL or start the server.';
+      return 'Cannot reach backend (connection refused). Server may be unavailable.';
     }
 
     final raw = error.toString().toLowerCase();
     if (raw.contains('connection refused')) {
-      return 'Cannot reach backend (connection refused). Check Backend URL or start the server.';
+      return 'Cannot reach backend (connection refused). Server may be unavailable.';
     }
     if (raw.contains('failed host lookup')) {
-      return 'Backend host lookup failed. Check the Backend URL.';
+      return 'Backend host lookup failed.';
     }
     return fallback;
   }

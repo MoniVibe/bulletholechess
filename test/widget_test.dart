@@ -27,7 +27,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Matchmaking'), findsOneWidget);
-    expect(find.text('Backend URL'), findsOneWidget);
+    expect(find.text('Backend URL'), findsNothing);
     expect(find.text('Display Name'), findsOneWidget);
     expect(find.text('Cooldown (seconds)'), findsOneWidget);
     expect(find.text('Check Status'), findsOneWidget);
