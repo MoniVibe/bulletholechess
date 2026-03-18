@@ -42,6 +42,13 @@ class OnlineGameController extends ChangeNotifier {
       const Duration(milliseconds: 200),
       (_) => _onTick(),
     );
+    _sessionLogger.beginSession(
+      sessionLabel: 'controller_boot',
+      context: <String, Object?>{
+        'cooldownSeconds': _cooldownDuration.inSeconds,
+      },
+    );
+    _sessionLogger.logEvent('controller_initialized');
   }
 
   final chess.Chess _game = chess.Chess();
@@ -97,6 +104,11 @@ class OnlineGameController extends ChangeNotifier {
   String? _inFlightMoveSource;
   int? _inFlightQueueToken;
   final List<String> _debugLogEntries = <String>[];
+  final GameSessionLogger _sessionLogger = GameSessionLogger(
+    applicationId: 'bulletholechess',
+    gameId: 'chess',
+    mode: 'online',
+  );
 
   OnlineConnectionState get connectionState => _connectionState;
   bool get isConnected => _connectionState == OnlineConnectionState.connected;
@@ -380,6 +392,14 @@ class OnlineGameController extends ChangeNotifier {
         'pieceSkinId': _myPieceSkinId,
       },
     );
+    _sessionLogger.beginSession(
+      sessionLabel: 'find_match',
+      context: <String, Object?>{
+        'apiBase': apiBaseUrl.trim(),
+        'displayName': normalizedName,
+        'cooldownSeconds': cooldownSeconds,
+      },
+    );
     _connectionState = OnlineConnectionState.connecting;
     _feedback = null;
     if (cooldownSeconds != null && cooldownSeconds > 0) {
@@ -432,6 +452,14 @@ class OnlineGameController extends ChangeNotifier {
     required String roomId,
     required String displayName,
   }) async {
+    _sessionLogger.beginSession(
+      sessionLabel: 'manual_connect',
+      context: <String, Object?>{
+        'serverUrl': serverUrl.trim(),
+        'roomId': roomId.trim(),
+        'displayName': displayName.trim(),
+      },
+    );
     await disconnect(notify: false);
 
     final normalizedRoom = roomId.trim().toLowerCase();
@@ -524,6 +552,10 @@ class OnlineGameController extends ChangeNotifier {
     _blackReadyAtMs = now;
     _clearForfeitLock();
     _feedback = null;
+    _sessionLogger.closeSession(
+      reason: 'disconnect',
+      summary: _sessionSnapshot(),
+    );
     if (notify) {
       notifyListeners();
     }
@@ -763,6 +795,10 @@ class OnlineGameController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _sessionLogger.closeSession(
+      reason: 'controller_dispose',
+      summary: _sessionSnapshot(),
+    );
     _disposed = true;
     _ticker.cancel();
     disconnect(notify: false);
@@ -1514,6 +1550,7 @@ class OnlineGameController extends ChangeNotifier {
     if (kDebugMode) {
       debugPrint('[online] $line');
     }
+    _sessionLogger.logEvent(event, data: details);
   }
 
   void _appendServerLogLine(Map<String, dynamic> entry) {
@@ -1556,5 +1593,24 @@ class OnlineGameController extends ChangeNotifier {
       return 'Backend host lookup failed.';
     }
     return fallback;
+  }
+
+  Map<String, Object?> _sessionSnapshot() {
+    return <String, Object?>{
+      'connectionState': _connectionState.name,
+      'status': _status,
+      'matchId': _matchId,
+      'myColor': _myColor,
+      'turnColor': turnColor,
+      'result': _result,
+      'historyLen': history.length,
+      'fen': _game.fen,
+      'cooldownSeconds': _cooldownDuration.inSeconds,
+      'whiteRemainingMs': cooldownRemaining('w').inMilliseconds,
+      'blackRemainingMs': cooldownRemaining('b').inMilliseconds,
+      'hasQueuedMove': hasQueuedMove,
+      'queuedMove': queuedMoveLabel,
+      'feedback': _feedback,
+    };
   }
 }

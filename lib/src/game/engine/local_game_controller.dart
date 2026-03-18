@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:bullethole_shared/bullethole_shared.dart';
 import 'package:chess/chess.dart' as chess;
 import 'package:flutter/foundation.dart';
 
@@ -31,6 +32,11 @@ class LocalGameController extends ChangeNotifier {
   final Duration aiThinkDelayMax;
   final Random _random;
   final DumbAiEngine _aiEngine;
+  final GameSessionLogger _sessionLogger = GameSessionLogger(
+    applicationId: 'bulletholechess',
+    gameId: 'chess',
+    mode: 'local_duel',
+  );
 
   late chess.Chess _game;
   late Timer _ticker;
@@ -190,7 +196,15 @@ class LocalGameController extends ChangeNotifier {
     if (cooldownDuration != null) {
       _cooldownDuration = cooldownDuration;
     }
+    _sessionLogger.beginSession(
+      sessionLabel: 'new_game',
+      context: <String, Object?>{
+        'playerAsWhite': playerAsWhite,
+        'cooldownSeconds': _cooldownDuration.inSeconds,
+      },
+    );
     _resetRuntimeState(activateGame: true);
+    _sessionLogger.logEvent('new_game_started', data: _sessionSnapshot());
     _maybeScheduleAiMove();
     notifyListeners();
   }
@@ -303,6 +317,10 @@ class LocalGameController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _sessionLogger.closeSession(
+      reason: 'controller_dispose',
+      summary: _sessionSnapshot(),
+    );
     _disposed = true;
     _ticker.cancel();
     _cancelAiTimer();
@@ -445,6 +463,16 @@ class LocalGameController extends ChangeNotifier {
     );
     _refreshSelectionForCurrentBoard();
     _refreshTerminalState();
+    _sessionLogger.logEvent(
+      'move_applied',
+      data: <String, Object?>{
+        ..._sessionSnapshot(),
+        'moverColor': moverColor,
+        'from': from,
+        'to': to,
+        'promotion': promotion,
+      },
+    );
     return true;
   }
 
@@ -627,5 +655,22 @@ class LocalGameController extends ChangeNotifier {
     }
     final delta = _random.nextInt(maxMs - minMs + 1);
     return Duration(milliseconds: minMs + delta);
+  }
+
+  Map<String, Object?> _sessionSnapshot() {
+    return <String, Object?>{
+      'playerColor': _playerColor,
+      'turnColor': turnColor,
+      'hasActiveGame': _hasActiveGame,
+      'isGameOver': isGameOver,
+      'winnerColor': _winnerColor,
+      'historyLen': _game.getHistory().length,
+      'fen': _game.fen,
+      'cooldownSeconds': _cooldownDuration.inSeconds,
+      'whiteRemainingMs': cooldownRemaining('w').inMilliseconds,
+      'blackRemainingMs': cooldownRemaining('b').inMilliseconds,
+      'feedback': _feedback,
+      'queuedMove': queuedMoveLabel,
+    };
   }
 }

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:bullethole_shared/bullethole_shared.dart';
 import 'package:chess/chess.dart' as chess;
 import 'package:flutter/foundation.dart';
 
@@ -26,6 +27,11 @@ class ChessAiGameController extends ChangeNotifier {
   final Duration aiMoveDelay;
   final DumbAiEngine _aiEngine;
   final chess.Chess _game = chess.Chess();
+  final GameSessionLogger _sessionLogger = GameSessionLogger(
+    applicationId: 'bulletholechess',
+    gameId: 'chess',
+    mode: 'vs_ai',
+  );
 
   late final Timer _ticker;
   Timer? _aiMoveTimer;
@@ -168,6 +174,13 @@ class ChessAiGameController extends ChangeNotifier {
     if (cooldownDuration != null) {
       _cooldownDuration = cooldownDuration;
     }
+    _sessionLogger.beginSession(
+      sessionLabel: 'new_game',
+      context: <String, Object?>{
+        'playerAsWhite': playerAsWhite,
+        'cooldownSeconds': _cooldownDuration.inSeconds,
+      },
+    );
     _game.reset();
     _hasActiveGame = true;
     _playerColor = playerAsWhite ? 'w' : 'b';
@@ -183,6 +196,7 @@ class ChessAiGameController extends ChangeNotifier {
     _blackReadyAtMs = now;
     _clearSelection();
     _scheduleAiMoveIfNeeded();
+    _sessionLogger.logEvent('new_game_started', data: _sessionSnapshot());
     notifyListeners();
   }
 
@@ -246,6 +260,15 @@ class ChessAiGameController extends ChangeNotifier {
         _queueMove(from: from, to: square, promotion: promotion);
         _clearSelection();
         _feedback = 'Queued $from-$square';
+        _sessionLogger.logEvent(
+          'player_move_queued',
+          data: <String, Object?>{
+            ..._sessionSnapshot(),
+            'from': from,
+            'to': square,
+            'promotion': promotion,
+          },
+        );
         notifyListeners();
         return;
       }
@@ -296,6 +319,15 @@ class ChessAiGameController extends ChangeNotifier {
     if (!isGameOver) {
       _scheduleAiMoveIfNeeded();
     }
+    _sessionLogger.logEvent(
+      'player_move_applied',
+      data: <String, Object?>{
+        ..._sessionSnapshot(),
+        'from': from,
+        'to': to,
+        'promotion': promotion,
+      },
+    );
     notifyListeners();
   }
 
@@ -371,6 +403,15 @@ class ChessAiGameController extends ChangeNotifier {
     _feedback = null;
     _tryExecuteQueuedMoveIfReady();
     _scheduleAiMoveIfNeeded();
+    _sessionLogger.logEvent(
+      'ai_move_applied',
+      data: <String, Object?>{
+        ..._sessionSnapshot(),
+        'from': aiMove.from,
+        'to': aiMove.to,
+        'promotion': aiMove.promotion,
+      },
+    );
     notifyListeners();
   }
 
@@ -424,6 +465,10 @@ class ChessAiGameController extends ChangeNotifier {
     if (validatedMove == null) {
       _clearQueuedMove();
       _feedback = 'Queued move is no longer legal.';
+      _sessionLogger.logEvent(
+        'queued_move_invalidated',
+        data: <String, Object?>{..._sessionSnapshot(), 'from': from, 'to': to},
+      );
       notifyListeners();
       return true;
     }
@@ -492,9 +537,30 @@ class ChessAiGameController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _sessionLogger.closeSession(
+      reason: 'controller_dispose',
+      summary: _sessionSnapshot(),
+    );
     _disposed = true;
     _ticker.cancel();
     _cancelAiMoveTimer();
     super.dispose();
+  }
+
+  Map<String, Object?> _sessionSnapshot() {
+    return <String, Object?>{
+      'playerColor': _playerColor,
+      'turnColor': turnColor,
+      'hasActiveGame': _hasActiveGame,
+      'isGameOver': isGameOver,
+      'isCheckmate': isCheckmate,
+      'isDraw': isDraw,
+      'historyLen': history.length,
+      'fen': _game.fen,
+      'cooldownSeconds': _cooldownDuration.inSeconds,
+      'whiteRemainingMs': cooldownRemaining('w').inMilliseconds,
+      'blackRemainingMs': cooldownRemaining('b').inMilliseconds,
+      'feedback': _feedback,
+    };
   }
 }
