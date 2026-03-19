@@ -303,17 +303,6 @@ class LocalGameController extends ChangeNotifier {
     }
 
     if (isOwnPiece) {
-      final onCooldown =
-          cooldownRemaining(playerColor).inMilliseconds > 0 ||
-          _isBlockedByForfeitLock(playerColor);
-      if (onCooldown && _selectedSquare != square) {
-        // Allow speculative queueing (e.g. predicted recapture) while cooling down.
-        _queuePlayerMove(from: from, to: square, promotion: _defaultPromotion);
-        _clearSelection();
-        _feedback = null;
-        notifyListeners();
-        return;
-      }
       _selectedSquare = square;
       _legalTargets = ChessRules.legalDestinationsFrom(
         game: _game,

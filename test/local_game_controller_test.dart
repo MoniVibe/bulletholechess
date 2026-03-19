@@ -5,7 +5,7 @@ import 'package:bulletholechess/src/game/engine/dumb_ai_engine.dart';
 import 'package:bulletholechess/src/game/engine/local_game_controller.dart';
 
 void main() {
-  test('own-piece tap during cooldown can queue speculative recapture', () {
+  test('own-piece tap during cooldown reselects instead of queueing', () {
     final controller = LocalGameController(
       initialCooldownDuration: const Duration(seconds: 5),
       aiThinkDelayMin: const Duration(days: 1),
@@ -23,10 +23,10 @@ void main() {
     controller.tapSquare('g1');
     controller.tapSquare('h2');
 
-    expect(controller.hasQueuedMove, isTrue);
-    expect(controller.queuedMoveFrom, 'g1');
-    expect(controller.queuedMoveTo, 'h2');
-    expect(controller.selectedSquare, isNull);
+    expect(controller.hasQueuedMove, isFalse);
+    expect(controller.queuedMoveFrom, isNull);
+    expect(controller.queuedMoveTo, isNull);
+    expect(controller.selectedSquare, 'h2');
   });
 
   test('queued move executes when cooldown expires', () async {

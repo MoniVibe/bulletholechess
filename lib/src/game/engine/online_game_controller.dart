@@ -669,24 +669,6 @@ class OnlineGameController extends ChangeNotifier {
     }
 
     if (isOwnPiece) {
-      final onCooldown = cooldownRemaining(color).inMilliseconds > 0;
-      if (onCooldown && !_disableQueuedInput && _selectedSquare != square) {
-        // Allow speculative queueing (e.g. predicted recapture) while cooling down.
-        _logEvent(
-          'queue_move',
-          details: <String, Object?>{
-            'from': from,
-            'to': square,
-            'reason': 'speculative_recapture',
-            'remainingMs': cooldownRemaining(color).inMilliseconds,
-          },
-        );
-        _queuePlayerMove(from: from, to: square, promotion: _defaultPromotion);
-        _clearSelection();
-        _feedback = null;
-        notifyListeners();
-        return;
-      }
       _selectedSquare = square;
       _legalTargets = ChessRules.legalDestinationsFrom(
         game: _game,
