@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:bullethole_shared/bullethole_shared.dart';
+import 'package:bullethole_shared/bullethole_shared_runtime.dart';
 import 'package:chess/chess.dart' as chess;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -23,7 +23,9 @@ class OnlineGameController extends ChangeNotifier {
   OnlineGameController({
     Duration initialCooldownDuration = const Duration(seconds: 3),
     http.Client? httpClient,
-  }) : _cooldownDuration = initialCooldownDuration {
+    DateTime Function()? nowProvider,
+  }) : _cooldownDuration = initialCooldownDuration,
+       _now = nowProvider ?? DateTime.now {
     _httpClient = httpClient ?? http.Client();
     _ownsHttpClient = httpClient == null;
     _transportClient = MultiplayerTransportClient(
@@ -35,7 +37,7 @@ class OnlineGameController extends ChangeNotifier {
       defaultTimeout: _defaultHealthTimeout,
       wakeTimeout: _defaultWakeTimeout,
     );
-    final now = DateTime.now().millisecondsSinceEpoch;
+    final now = _now().millisecondsSinceEpoch;
     _whiteReadyAtMs = now;
     _blackReadyAtMs = now;
     _ticker = Timer.periodic(
@@ -58,6 +60,7 @@ class OnlineGameController extends ChangeNotifier {
   late final bool _ownsHttpClient;
   late final BackendHealthChecker _backendHealthChecker;
   late final MultiplayerTransportClient _transportClient;
+  final DateTime Function() _now;
 
   OnlineConnectionState _connectionState = OnlineConnectionState.disconnected;
   Duration _cooldownDuration;
@@ -314,7 +317,7 @@ class OnlineGameController extends ChangeNotifier {
   String buildDebugReport({int maxEntries = 250}) {
     final header = <String>[
       'Bullethole Chess Debug Report',
-      'generatedAt=${DateTime.now().toIso8601String()}',
+      'generatedAt=${_now().toIso8601String()}',
       'connectionState=${_connectionState.name}',
       'matchId=${_matchId ?? '-'}',
       'status=$_status',
@@ -425,6 +428,7 @@ class OnlineGameController extends ChangeNotifier {
         matchId: joined.matchId,
         playerId: joined.playerId,
       );
+      _sessionLogger.setRoomOrMatchId(joined.matchId);
       _logEvent(
         'matchmaking_success',
         details: <String, Object?>{
@@ -547,7 +551,7 @@ class OnlineGameController extends ChangeNotifier {
     _inFlightClientMoveId = null;
     _inFlightMoveSource = null;
     _inFlightQueueToken = null;
-    final now = DateTime.now().millisecondsSinceEpoch;
+    final now = _now().millisecondsSinceEpoch;
     _whiteReadyAtMs = now;
     _blackReadyAtMs = now;
     _clearForfeitLock();
@@ -1122,6 +1126,7 @@ class OnlineGameController extends ChangeNotifier {
       case 'welcome':
         _connectionState = OnlineConnectionState.connected;
         _matchId = map['matchId'] as String? ?? _matchId;
+        _sessionLogger.setRoomOrMatchId(_matchId);
         _myColor = map['color'] as String?;
         final welcomePieceSkinId = MultiplayerClientUtils.sanitizeIdentifier(
           map['pieceSkinId'],
@@ -1141,7 +1146,7 @@ class OnlineGameController extends ChangeNotifier {
         }
         final serverNow = MultiplayerClientUtils.readInt(map['serverNow']);
         if (serverNow != null) {
-          _clockOffsetMs = serverNow - DateTime.now().millisecondsSinceEpoch;
+          _clockOffsetMs = serverNow - _now().millisecondsSinceEpoch;
         }
         _applyForfeitLockFromPayload(map);
 
@@ -1178,7 +1183,7 @@ class OnlineGameController extends ChangeNotifier {
         _feedback = message;
         final serverNow = MultiplayerClientUtils.readInt(map['serverNow']);
         if (serverNow != null) {
-          _clockOffsetMs = serverNow - DateTime.now().millisecondsSinceEpoch;
+          _clockOffsetMs = serverNow - _now().millisecondsSinceEpoch;
         }
         _applyForfeitLockFromPayload(map);
 
@@ -1253,7 +1258,7 @@ class OnlineGameController extends ChangeNotifier {
 
     final serverNow = MultiplayerClientUtils.readInt(state['serverNow']);
     if (serverNow != null) {
-      _clockOffsetMs = serverNow - DateTime.now().millisecondsSinceEpoch;
+      _clockOffsetMs = serverNow - _now().millisecondsSinceEpoch;
     }
 
     final cooldownSeconds = MultiplayerClientUtils.readInt(
@@ -1408,6 +1413,28 @@ class OnlineGameController extends ChangeNotifier {
         'historyLen': history.length,
       },
     );
+    if (_lastMoverColor != null) {
+      _sessionLogger.logBughuntEvent(
+        'turn_ended',
+        payload: <String, Object?>{
+          'moverColor': _lastMoverColor,
+          ..._sessionSnapshot(),
+        },
+        turnIndex: _derivedTurnIndex(),
+        actionIndexOrPlyIndex: _derivedActionIndex(),
+      );
+    }
+    _sessionLogger.logBughuntEvent(
+      'turn_started',
+      payload: <String, Object?>{'turnColor': turnColor, ..._sessionSnapshot()},
+      turnIndex: _derivedTurnIndex(),
+      actionIndexOrPlyIndex: _derivedActionIndex(),
+    );
+    _sessionLogger.recordStateSnapshot(
+      _sessionSnapshot(),
+      turnIndex: _derivedTurnIndex(),
+      actionIndexOrPlyIndex: _derivedActionIndex(),
+    );
     _refreshSelectionForCurrentBoard();
     notifyListeners();
   }
@@ -1458,7 +1485,7 @@ class OnlineGameController extends ChangeNotifier {
   }
 
   int _estimatedServerNowMs() {
-    return DateTime.now().millisecondsSinceEpoch + _clockOffsetMs;
+    return _now().millisecondsSinceEpoch + _clockOffsetMs;
   }
 
   bool _isRetriableQueueError(String? code, String message) {
@@ -1535,7 +1562,7 @@ class OnlineGameController extends ChangeNotifier {
     String event, {
     Map<String, Object?> details = const <String, Object?>{},
   }) {
-    final ts = DateTime.now().toIso8601String();
+    final ts = _now().toIso8601String();
     final detailText = details.entries
         .where((entry) => entry.value != null)
         .map((entry) => '${entry.key}=${entry.value}')
@@ -1595,8 +1622,14 @@ class OnlineGameController extends ChangeNotifier {
     return fallback;
   }
 
+  int _derivedActionIndex() => history.length;
+
+  int _derivedTurnIndex() => (_derivedActionIndex() ~/ 2) + 1;
+
   Map<String, Object?> _sessionSnapshot() {
     return <String, Object?>{
+      'turnIndex': _derivedTurnIndex(),
+      'actionIndexOrPlyIndex': _derivedActionIndex(),
       'connectionState': _connectionState.name,
       'status': _status,
       'matchId': _matchId,

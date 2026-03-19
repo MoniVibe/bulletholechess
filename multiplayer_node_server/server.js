@@ -1186,10 +1186,25 @@ function applyMoveAsColor(game, color, movePayload) {
 function cloneGameWithTurn(game, color) {
   const fen = game.fen();
   const parts = fen.split(' ');
-  if (parts.length >= 2) {
+  if (parts.length >= 6) {
+    const originalTurn = parts[1];
     parts[1] = color;
+    if (originalTurn !== color) {
+      // If we force-turn to the opposite color, stale en-passant squares can
+      // become illegal in chess.js for that turn.
+      parts[3] = '-';
+    }
   }
-  return new Chess(parts.join(' '));
+  try {
+    return new Chess(parts.join(' '));
+  } catch (_error) {
+    // Last-resort normalization keeps the backend alive for diagnostics runs.
+    if (parts.length >= 6) {
+      const fallbackFen = [parts[0], parts[1], parts[2], '-', parts[4], parts[5]].join(' ');
+      return new Chess(fallbackFen);
+    }
+    return new Chess(fen);
+  }
 }
 
 function sanitizeName(value) {

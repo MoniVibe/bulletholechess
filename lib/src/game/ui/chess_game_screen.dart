@@ -25,18 +25,60 @@ class _ChessGameScreenState extends State<ChessGameScreen> {
       body: GameBackdrop(
         backgroundAssetPath: AppAssets.appBackground,
         child: SafeArea(
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-                child: _buildHeader(context),
-              ),
-              Expanded(
-                child: _mode == _ChessMode.vsAi
-                    ? const ChessAiPanel()
-                    : const OnlineGamePanel(showModeSwitch: false),
-              ),
-            ],
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final showNavRail = constraints.maxWidth >= 920;
+              return Row(
+                children: <Widget>[
+                  if (showNavRail)
+                    GameNavRail(
+                      destinations: <GameNavDestination>[
+                        GameNavDestination(
+                          icon: Icons.smart_toy_outlined,
+                          tooltip: 'Vs AI',
+                          isActive: _mode == _ChessMode.vsAi,
+                          onTap: () {
+                            UiSfx.tap();
+                            setState(() {
+                              _mode = _ChessMode.vsAi;
+                            });
+                          },
+                        ),
+                        GameNavDestination(
+                          icon: Icons.wifi_rounded,
+                          tooltip: 'Online',
+                          isActive: _mode == _ChessMode.online,
+                          onTap: () {
+                            UiSfx.tap();
+                            setState(() {
+                              _mode = _ChessMode.online;
+                            });
+                          },
+                        ),
+                        const GameNavDestination(
+                          icon: Icons.history_rounded,
+                          tooltip: 'Recent games',
+                        ),
+                      ],
+                    ),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                          child: _buildHeader(context),
+                        ),
+                        Expanded(
+                          child: _mode == _ChessMode.vsAi
+                              ? const ChessAiPanel()
+                              : const OnlineGamePanel(showModeSwitch: false),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),

@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:bullethole_shared/bullethole_shared.dart';
+import 'package:bullethole_shared/bullethole_shared_runtime.dart';
 import 'package:chess/chess.dart' as chess;
 import 'package:flutter/foundation.dart';
 
@@ -13,9 +13,11 @@ class ChessAiGameController extends ChangeNotifier {
     this.aiMoveDelay = const Duration(milliseconds: 550),
     Duration initialCooldownDuration = const Duration(seconds: 3),
     DumbAiEngine? aiEngine,
+    DateTime Function()? nowProvider,
   }) : _aiEngine = aiEngine ?? DumbAiEngine(),
-       _cooldownDuration = initialCooldownDuration {
-    final now = DateTime.now().millisecondsSinceEpoch;
+       _cooldownDuration = initialCooldownDuration,
+       _now = nowProvider ?? DateTime.now {
+    final now = _now().millisecondsSinceEpoch;
     _whiteReadyAtMs = now;
     _blackReadyAtMs = now;
     _ticker = Timer.periodic(
@@ -26,6 +28,7 @@ class ChessAiGameController extends ChangeNotifier {
 
   final Duration aiMoveDelay;
   final DumbAiEngine _aiEngine;
+  final DateTime Function() _now;
   final chess.Chess _game = chess.Chess();
   final GameSessionLogger _sessionLogger = GameSessionLogger(
     applicationId: 'bulletholechess',
@@ -197,6 +200,17 @@ class ChessAiGameController extends ChangeNotifier {
     _clearSelection();
     _scheduleAiMoveIfNeeded();
     _sessionLogger.logEvent('new_game_started', data: _sessionSnapshot());
+    _sessionLogger.logBughuntEvent(
+      'turn_started',
+      payload: <String, Object?>{'turnColor': turnColor, ..._sessionSnapshot()},
+      turnIndex: _derivedTurnIndex(),
+      actionIndexOrPlyIndex: _derivedActionIndex(),
+    );
+    _sessionLogger.recordStateSnapshot(
+      _sessionSnapshot(),
+      turnIndex: _derivedTurnIndex(),
+      actionIndexOrPlyIndex: _derivedActionIndex(),
+    );
     notifyListeners();
   }
 
@@ -328,6 +342,26 @@ class ChessAiGameController extends ChangeNotifier {
         'promotion': promotion,
       },
     );
+    _sessionLogger.logBughuntEvent(
+      'turn_ended',
+      payload: <String, Object?>{
+        'moverColor': _playerColor,
+        ..._sessionSnapshot(),
+      },
+      turnIndex: _derivedTurnIndex(),
+      actionIndexOrPlyIndex: _derivedActionIndex(),
+    );
+    _sessionLogger.logBughuntEvent(
+      'turn_started',
+      payload: <String, Object?>{'turnColor': turnColor, ..._sessionSnapshot()},
+      turnIndex: _derivedTurnIndex(),
+      actionIndexOrPlyIndex: _derivedActionIndex(),
+    );
+    _sessionLogger.recordStateSnapshot(
+      _sessionSnapshot(),
+      turnIndex: _derivedTurnIndex(),
+      actionIndexOrPlyIndex: _derivedActionIndex(),
+    );
     notifyListeners();
   }
 
@@ -412,10 +446,27 @@ class ChessAiGameController extends ChangeNotifier {
         'promotion': aiMove.promotion,
       },
     );
+    _sessionLogger.logBughuntEvent(
+      'turn_ended',
+      payload: <String, Object?>{'moverColor': aiColor, ..._sessionSnapshot()},
+      turnIndex: _derivedTurnIndex(),
+      actionIndexOrPlyIndex: _derivedActionIndex(),
+    );
+    _sessionLogger.logBughuntEvent(
+      'turn_started',
+      payload: <String, Object?>{'turnColor': turnColor, ..._sessionSnapshot()},
+      turnIndex: _derivedTurnIndex(),
+      actionIndexOrPlyIndex: _derivedActionIndex(),
+    );
+    _sessionLogger.recordStateSnapshot(
+      _sessionSnapshot(),
+      turnIndex: _derivedTurnIndex(),
+      actionIndexOrPlyIndex: _derivedActionIndex(),
+    );
     notifyListeners();
   }
 
-  int _estimatedNowMs() => DateTime.now().millisecondsSinceEpoch;
+  int _estimatedNowMs() => _now().millisecondsSinceEpoch;
 
   void _startCooldown(String color) {
     final now = _estimatedNowMs();
@@ -547,8 +598,14 @@ class ChessAiGameController extends ChangeNotifier {
     super.dispose();
   }
 
+  int _derivedActionIndex() => _game.getHistory().length;
+
+  int _derivedTurnIndex() => (_derivedActionIndex() ~/ 2) + 1;
+
   Map<String, Object?> _sessionSnapshot() {
     return <String, Object?>{
+      'turnIndex': _derivedTurnIndex(),
+      'actionIndexOrPlyIndex': _derivedActionIndex(),
       'playerColor': _playerColor,
       'turnColor': turnColor,
       'hasActiveGame': _hasActiveGame,

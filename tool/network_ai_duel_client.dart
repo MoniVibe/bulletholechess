@@ -1,12 +1,10 @@
 // ignore_for_file: avoid_print
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:bullethole_shared/src/multiplayer/multiplayer_client_utils.dart';
-import 'package:bullethole_shared/src/multiplayer/multiplayer_transport_client.dart';
+import 'package:bullethole_shared/bullethole_shared_runtime.dart';
 import 'package:chess/chess.dart' as chess;
 import 'package:http/http.dart' as http;
 
@@ -17,7 +15,12 @@ Future<void> main(List<String> args) async {
   await runZoned(
     () async {
       final config = _Config.parse(args);
-      final logger = _JsonlLogger(path: config.logFilePath);
+      final logger = _JsonlLogger(
+        path: config.logFilePath,
+        runId: config.runId,
+        role: config.role,
+        seed: config.seed,
+      );
       await logger.log(<String, Object?>{
         'event': 'client_start',
         'at': DateTime.now().toIso8601String(),
@@ -79,6 +82,7 @@ class _ChessNetworkAiSession {
   final Completer<void> _done = Completer<void>();
 
   Timer? _ticker;
+  Timer? _watchdog;
   String? _myColor;
   String _status = 'disconnected';
   String? _result;
@@ -135,6 +139,18 @@ class _ChessNetworkAiSession {
       Duration(milliseconds: config.pollMs),
       (_) => _onTick(),
     );
+    _watchdog = Timer(Duration(seconds: config.maxSeconds), () {
+      if (_done.isCompleted || _disposed) {
+        return;
+      }
+      logger.log(<String, Object?>{
+        'event': 'game_over',
+        'at': DateTime.now().toIso8601String(),
+        'result': 'max_seconds_cutoff',
+        'sequence': _sequence,
+      });
+      _finish();
+    });
     await _done.future;
   }
 
@@ -183,10 +199,14 @@ class _ChessNetworkAiSession {
         _updateClockOffset(message['serverNow']);
         _updateCooldownSnapshot(message['cooldownEndsAt']);
         _forfeitLock = _readMap(message['forfeitLock']) ?? _forfeitLock;
+        final code = message['code']?.toString();
         logger.log(<String, Object?>{
-          'event': 'server_error',
+          'event': _classifyServerErrorEvent(
+            code: code,
+            message: message['message']?.toString(),
+          ),
           'at': DateTime.now().toIso8601String(),
-          'code': message['code'],
+          'code': code,
           'message': message['message'],
           'remainingMs': message['remainingMs'],
         });
@@ -238,7 +258,8 @@ class _ChessNetworkAiSession {
       final ackColor = (lastMove['color'] as String?)?.trim().toLowerCase();
       final ackFrom = (lastMove['from'] as String?)?.trim().toLowerCase();
       final ackTo = (lastMove['to'] as String?)?.trim().toLowerCase();
-      final ackMatchesMoveId = ackMoveId != null && ackMoveId == _inFlightClientMoveId;
+      final ackMatchesMoveId =
+          ackMoveId != null && ackMoveId == _inFlightClientMoveId;
       final ackMatchesSender = ackColor != null
           ? ackColor == _myColor
           : (ackFrom == _inFlightFrom && ackTo == _inFlightTo);
@@ -265,11 +286,23 @@ class _ChessNetworkAiSession {
       'status': _status,
       'result': _result,
       'turn': message['turn'],
+      'fen': _fen,
       'cooldownRemainingMs': _myColor == null
           ? null
           : _cooldownRemainingMs(_myColor!),
       'moveInFlight': _moveInFlight,
     });
+
+    if (_sequence >= config.maxPlies) {
+      logger.log(<String, Object?>{
+        'event': 'game_over',
+        'at': DateTime.now().toIso8601String(),
+        'result': 'max_ply_cutoff',
+        'sequence': _sequence,
+      });
+      _finish();
+      return;
+    }
 
     if (_result != null && config.exitOnGameOver) {
       logger.log(<String, Object?>{
@@ -429,6 +462,29 @@ class _ChessNetworkAiSession {
     _dispose();
   }
 
+  String _classifyServerErrorEvent({String? code, String? message}) {
+    final normalizedCode = code?.trim().toLowerCase() ?? '';
+    final normalizedMessage = message?.trim().toLowerCase() ?? '';
+    const recoverableCodes = <String>{
+      'stale_state',
+      'cooldown_active',
+      'not_your_turn',
+      'invalid_move',
+      'illegal_move',
+      'forfeit_waiting_release',
+      'queue_rejected',
+      'queue_conflict',
+    };
+    if (recoverableCodes.contains(normalizedCode) ||
+        normalizedMessage.contains('illegal move') ||
+        normalizedMessage.contains('invalid move') ||
+        normalizedMessage.contains('not your turn') ||
+        normalizedMessage.contains('waiting for opponent')) {
+      return 'action_rejected';
+    }
+    return 'server_error';
+  }
+
   void _finish() {
     if (!_done.isCompleted) {
       _done.complete();
@@ -442,11 +498,19 @@ class _ChessNetworkAiSession {
     }
     _disposed = true;
     _ticker?.cancel();
+    _watchdog?.cancel();
   }
 }
 
 class _JsonlLogger {
-  _JsonlLogger({required this.path}) : _file = File(path) {
+  _JsonlLogger({
+    required this.path,
+    required this.runId,
+    required BughuntRole role,
+    required this.seed,
+  }) : _file = File(path),
+       _sessionId = 'net_${_timestamp()}_$pid',
+       _role = role {
     final parent = _file.parent;
     if (!parent.existsSync()) {
       parent.createSync(recursive: true);
@@ -454,11 +518,63 @@ class _JsonlLogger {
   }
 
   final String path;
+  final String runId;
+  final BughuntRole _role;
+  final int seed;
   final File _file;
+  final String _sessionId;
+  final BughuntStateHasher _stateHasher = const BughuntStateHasher();
   Future<void> _pending = Future<void>.value();
+  int _logicalTick = 0;
 
   Future<void> log(Map<String, Object?> event) async {
-    final line = '${jsonEncode(event)}\n';
+    _logicalTick += 1;
+    final rawEventType = event['event']?.toString() ?? 'state_snapshot';
+    final mappedEventType = _eventType(rawEventType);
+    final sequence = MultiplayerClientUtils.readInt(event['sequence']) ?? 0;
+    final historyLen =
+        MultiplayerClientUtils.readInt(event['historyLen']) ?? sequence;
+    final payload = <String, Object?>{...event};
+    if (mappedEventType == 'state_snapshot') {
+      final hashInput = <String, Object?>{
+        'matchId': payload['matchId'],
+        'sequence': payload['sequence'],
+        'status': payload['status'],
+        'result': payload['result'],
+        'turn': payload['turn'],
+        'fen': payload['fen'],
+      };
+      final hash = _stateHasher.hashSnapshot(hashInput);
+      payload['stateHash'] = hash.value;
+      payload['stateHashAlgorithm'] = hash.algorithm;
+      payload['snapshotHashValid'] = true;
+    }
+    final severity = _severityForEvent(rawEventType);
+    final sessionEvent = SessionEvent(
+      schemaVersion: bughuntSchemaVersion,
+      runId: runId,
+      sessionId: _sessionId,
+      game: 'chess',
+      mode: BughuntMode.online,
+      role: _role,
+      appVersionOrCommitSha: Platform.environment['BULLETHOLE_COMMIT_SHA'],
+      roomIdOrMatchId: event['matchId']?.toString(),
+      seed: seed,
+      maxTurns: null,
+      deviceInfo: <String, Object?>{
+        'os': Platform.operatingSystem,
+        'osVersion': Platform.operatingSystemVersion,
+        'pid': pid,
+      },
+      logicalTick: _logicalTick,
+      wallClockTs: DateTime.now().toUtc().toIso8601String(),
+      turnIndex: (historyLen ~/ 2) + 1,
+      actionIndexOrPlyIndex: historyLen,
+      eventType: mappedEventType,
+      payload: payload,
+      severity: severity,
+    );
+    final line = sessionEventToJsonLine(sessionEvent);
     _pending = _pending.then((_) async {
       try {
         await _file.writeAsString(line, mode: FileMode.append, flush: true);
@@ -472,6 +588,51 @@ class _JsonlLogger {
   Future<void> close() async {
     await _pending;
   }
+
+  String _eventType(String eventType) {
+    final normalized = eventType.toLowerCase();
+    if (normalized.contains('start')) {
+      return 'app_start';
+    }
+    if (normalized == 'match_joined' || normalized == 'welcome') {
+      return 'session_joined';
+    }
+    if (normalized.contains('move_sent')) {
+      return 'action_launched';
+    }
+    if (normalized.contains('move_acked')) {
+      return 'action_applied';
+    }
+    if (normalized.contains('action_rejected') ||
+        normalized.contains('move_rejected') ||
+        normalized.contains('rejected')) {
+      return 'action_rejected';
+    }
+    if (normalized.contains('server_error') || normalized.contains('fatal')) {
+      return 'invariant_failure';
+    }
+    if (normalized == 'game_over') {
+      return 'session_complete';
+    }
+    if (normalized == 'opponent_left') {
+      return 'disconnect';
+    }
+    if (normalized == 'state') {
+      return 'state_snapshot';
+    }
+    return eventType;
+  }
+
+  BughuntSeverity _severityForEvent(String eventType) {
+    final normalized = eventType.toLowerCase();
+    if (normalized.contains('fatal') || normalized.contains('error')) {
+      return BughuntSeverity.error;
+    }
+    if (normalized.contains('warn')) {
+      return BughuntSeverity.warn;
+    }
+    return BughuntSeverity.info;
+  }
 }
 
 class _Config {
@@ -482,8 +643,12 @@ class _Config {
     required this.seed,
     required this.pollMs,
     required this.settleMs,
+    required this.maxPlies,
+    required this.maxSeconds,
     required this.exitOnGameOver,
     required this.logFilePath,
+    required this.runId,
+    required this.role,
   });
 
   final String backendUrl;
@@ -492,8 +657,12 @@ class _Config {
   final int seed;
   final int pollMs;
   final int settleMs;
+  final int maxPlies;
+  final int maxSeconds;
   final bool exitOnGameOver;
   final String logFilePath;
+  final String runId;
+  final BughuntRole role;
 
   static _Config parse(List<String> args) {
     var backendUrl = 'http://localhost:8080';
@@ -502,8 +671,12 @@ class _Config {
     var seed = DateTime.now().millisecondsSinceEpoch & 0x7fffffff;
     var pollMs = 120;
     var settleMs = 250;
+    var maxPlies = 240;
+    var maxSeconds = 300;
     var exitOnGameOver = true;
     String? logFilePath;
+    String? runId;
+    var role = BughuntRole.client;
 
     for (final arg in args) {
       if (arg.startsWith('--backend-url=')) {
@@ -532,12 +705,31 @@ class _Config {
         settleMs = int.parse(arg.substring('--settle-ms='.length));
         continue;
       }
+      if (arg.startsWith('--max-plies=')) {
+        maxPlies = int.parse(arg.substring('--max-plies='.length));
+        continue;
+      }
+      if (arg.startsWith('--max-seconds=')) {
+        maxSeconds = int.parse(arg.substring('--max-seconds='.length));
+        continue;
+      }
       if (arg == '--stay-alive') {
         exitOnGameOver = false;
         continue;
       }
       if (arg.startsWith('--log-file=')) {
         logFilePath = arg.substring('--log-file='.length).trim();
+        continue;
+      }
+      if (arg.startsWith('--run-id=')) {
+        runId = arg.substring('--run-id='.length).trim();
+        continue;
+      }
+      if (arg.startsWith('--role=')) {
+        final parsed = parseBughuntRole(arg.substring('--role='.length).trim());
+        if (parsed != null) {
+          role = parsed;
+        }
         continue;
       }
       if (arg == '--help' || arg == '-h') {
@@ -558,9 +750,16 @@ class _Config {
     if (settleMs < 0) {
       throw ArgumentError('--settle-ms must be >= 0');
     }
+    if (maxPlies <= 0) {
+      throw ArgumentError('--max-plies must be > 0');
+    }
+    if (maxSeconds <= 0) {
+      throw ArgumentError('--max-seconds must be > 0');
+    }
 
     logFilePath ??=
         'debug/network-ai-chess-${displayName.toLowerCase()}-${_timestamp()}.jsonl';
+    runId ??= 'net_${_timestamp()}';
 
     return _Config(
       backendUrl: backendUrl,
@@ -569,8 +768,12 @@ class _Config {
       seed: seed,
       pollMs: pollMs,
       settleMs: settleMs,
+      maxPlies: maxPlies,
+      maxSeconds: maxSeconds,
       exitOnGameOver: exitOnGameOver,
       logFilePath: logFilePath,
+      runId: runId,
+      role: role,
     );
   }
 }
@@ -591,8 +794,8 @@ Never _printUsageAndExit() {
     'Usage: dart run tool/network_ai_duel_client.dart '
     '[--backend-url=http://localhost:8080] [--name=ChessAI-A] '
     '[--cooldown-seconds=0] [--seed=123] [--poll-ms=120] '
-    '[--settle-ms=250] '
-    '[--log-file=debug/chess-network.jsonl] [--stay-alive]',
+    '[--settle-ms=250] [--max-plies=240] [--max-seconds=300] '
+    '[--log-file=debug/chess-network.jsonl] [--run-id=id] [--role=host|client] [--stay-alive]',
   );
   exit(0);
 }

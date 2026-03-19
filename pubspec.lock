@@ -36,11 +36,9 @@ packages:
   bullethole_shared:
     dependency: "direct main"
     description:
-      path: "."
-      ref: "86966bb00ddfaddc39ab70915a95ad6bab1081fb"
-      resolved-ref: "86966bb00ddfaddc39ab70915a95ad6bab1081fb"
-      url: "https://github.com/meshik/pureflutter.git"
-    source: git
+      path: "../bullethole-shared"
+      relative: true
+    source: path
     version: "0.1.0"
   characters:
     dependency: transitive
@@ -107,7 +105,7 @@ packages:
     source: hosted
     version: "1.0.8"
   fake_async:
-    dependency: transitive
+    dependency: "direct dev"
     description:
       name: fake_async
       sha256: "5368f224a74523e8d2e7399ea1638b37aecfca824a3cc4dfdf77bf1fa905ac44"

@@ -24,8 +24,8 @@ if ($MaxConversionFailures -lt -1) {
 }
 
 $repoRoot = $PSScriptRoot
-$dartDefault = 'C:\dev\flutter\bin\dart.bat'
-$dartExe = if (Test-Path $dartDefault) { $dartDefault } else { 'dart' }
+$dartDefault = 'C:\dev\flutter\bin\flutter.bat'
+$dartExe = if (Test-Path $dartDefault) { $dartDefault } else { 'flutter' }
 
 if ($Seed -le 0) {
   $Seed = Get-Random -Minimum 1 -Maximum 2147483647
@@ -42,7 +42,7 @@ Write-Host "ConversionFailCapAdv: $ConversionFailCapAdv | MaxConversionFailures:
 Write-Host "Log file: $logFilePath"
 Write-Host ''
 
-& $dartExe run tool\ai_duel.dart --games=$Games --max-plies=$MaxPlies --seed=$Seed --conversion-fail-cap-adv=$ConversionFailCapAdv --max-conversion-failures=$MaxConversionFailures --log-file="$logFilePath"
+& $dartExe pub run tool\ai_duel.dart --games=$Games --max-plies=$MaxPlies --seed=$Seed --conversion-fail-cap-adv=$ConversionFailCapAdv --max-conversion-failures=$MaxConversionFailures --log-file="$logFilePath"
 $exitCode = $LASTEXITCODE
 
 if ($exitCode -ne 0) {

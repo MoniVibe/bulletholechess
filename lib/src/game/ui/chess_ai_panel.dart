@@ -570,6 +570,35 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
               ),
               const SizedBox(height: 10),
               Card(
+                color: Theme.of(
+                  context,
+                ).colorScheme.error.withValues(alpha: 0.16),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Note:',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _controller.feedback ?? '-',
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurface.withValues(alpha: 0.88),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Card(
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Row(

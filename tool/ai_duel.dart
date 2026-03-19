@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:bullethole_shared/bullethole_shared_runtime.dart';
 import 'package:chess/chess.dart' as chess;
 
 import 'package:bulletholechess/src/game/engine/chess_rules.dart';
@@ -20,7 +21,15 @@ const String _defaultPgnDirName = 'ai-duel-weird-pgn';
 
 void main(List<String> args) {
   final config = _DuelConfig.parse(args);
-  final summary = _runDuels(config);
+  final bughuntLogger = _BughuntRunLogger(
+    game: 'chess',
+    mode: BughuntMode.ai,
+    role: BughuntRole.localA,
+    seed: config.seed,
+    maxTurns: config.maxPlies,
+    runId: config.runId,
+  )..begin();
+  final summary = _runDuels(config, logger: bughuntLogger);
 
   print('AI duel summary:');
   print('  games: ${summary.totalGames}');
@@ -64,6 +73,8 @@ void main(List<String> args) {
     print('Saved weird PGNs to ${config.pgnDirPath}');
   }
 
+  bughuntLogger.complete(summary: summary);
+
   if (summary.failures.isNotEmpty) {
     for (final failure in summary.failures) {
       print('');
@@ -90,7 +101,7 @@ void main(List<String> args) {
   }
 }
 
-_DuelSummary _runDuels(_DuelConfig config) {
+_DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
   if (config.pgnDirPath != null) {
     _preparePgnOutputDir(config.pgnDirPath!);
   }
@@ -107,6 +118,12 @@ _DuelSummary _runDuels(_DuelConfig config) {
   var cappedGames = 0;
 
   for (var gameIndex = 1; gameIndex <= config.games; gameIndex++) {
+    logger?.event(
+      'session_joined',
+      payload: <String, Object?>{'gameIndex': gameIndex},
+      turnIndex: 1,
+      actionIndexOrPlyIndex: 0,
+    );
     final failuresBeforeGame = failures.length;
     final game = chess.Chess();
     final whiteAi = DumbAiEngine(random: Random(runRandom.nextInt(1 << 31)));
@@ -301,6 +318,19 @@ _DuelSummary _runDuels(_DuelConfig config) {
 
       ply += 1;
       playedMoves.add('${move.from}-${move.to}');
+      logger?.event(
+        'action_applied',
+        payload: <String, Object?>{
+          'gameIndex': gameIndex,
+          'actorColor': side,
+          'from': move.from,
+          'to': move.to,
+          'promotion': move.promotion,
+          'fen': game.fen,
+        },
+        turnIndex: (ply ~/ 2) + 1,
+        actionIndexOrPlyIndex: ply,
+      );
 
       final fen = game.fen;
       final legalMoveCount = _safeLegalMoveCount(game);
@@ -366,6 +396,20 @@ _DuelSummary _runDuels(_DuelConfig config) {
     }
 
     if (failures.length > failuresBeforeGame || gameFailed) {
+      if (failures.length > failuresBeforeGame) {
+        final failure = failures.last;
+        logger?.invariantFailure(
+          code: invariantSessionTerminationInvalid,
+          message: failure.message,
+          turnIndex: (failure.ply ~/ 2) + 1,
+          actionIndexOrPlyIndex: failure.ply,
+          context: <String, Object?>{
+            'gameIndex': failure.gameIndex,
+            'fen': failure.fen,
+            'sideToMove': failure.sideToMove,
+          },
+        );
+      }
       _incrementCount(terminationReasonCounts, 'failure');
       if (config.pgnDirPath != null && gameWeirdEvents.isNotEmpty) {
         _writeWeirdGamePgn(
@@ -870,6 +914,7 @@ class _DuelConfig {
     required this.maxConversionFailures,
     required this.logFilePath,
     required this.pgnDirPath,
+    required this.runId,
   });
 
   final int games;
@@ -881,6 +926,7 @@ class _DuelConfig {
   final int maxConversionFailures;
   final String? logFilePath;
   final String? pgnDirPath;
+  final String? runId;
 
   static _DuelConfig parse(List<String> args) {
     var games = _defaultGames;
@@ -893,6 +939,7 @@ class _DuelConfig {
     var maxConversionFailures = _defaultMaxConversionFailures;
     String? logFilePath;
     String? pgnDirPath;
+    String? runId;
 
     for (final arg in args) {
       if (arg.startsWith('--games=')) {
@@ -939,6 +986,10 @@ class _DuelConfig {
         pgnDirPath = arg.substring('--pgn-dir='.length);
         continue;
       }
+      if (arg.startsWith('--run-id=')) {
+        runId = arg.substring('--run-id='.length).trim();
+        continue;
+      }
       if (arg == '--help' || arg == '-h') {
         _printUsageAndExit();
       }
@@ -981,6 +1032,7 @@ class _DuelConfig {
       maxConversionFailures: maxConversionFailures,
       logFilePath: logFilePath,
       pgnDirPath: pgnDirPath,
+      runId: runId,
     );
   }
 }
@@ -1071,13 +1123,95 @@ class _WeirdEvent {
   };
 }
 
+class _BughuntRunLogger {
+  _BughuntRunLogger({
+    required this.game,
+    required this.mode,
+    required this.role,
+    required this.seed,
+    required this.maxTurns,
+    required this.runId,
+  }) : _logger = GameSessionLogger(
+         applicationId: 'bulletholechess',
+         gameId: game,
+         mode: mode.name,
+         bughuntConfig: BughuntConfig(
+           runId: runId ?? 'adhoc_ai_duel',
+           mode: mode,
+           role: role,
+           seed: seed,
+           maxTurns: maxTurns,
+         ),
+       );
+
+  final String game;
+  final BughuntMode mode;
+  final BughuntRole role;
+  final int seed;
+  final int maxTurns;
+  final String? runId;
+  final GameSessionLogger _logger;
+
+  void begin() {
+    _logger.beginSession(
+      sessionLabel: 'ai_duel',
+      context: <String, Object?>{'seed': seed, 'maxTurns': maxTurns},
+    );
+  }
+
+  void event(
+    String eventType, {
+    Map<String, Object?> payload = const <String, Object?>{},
+    int? turnIndex,
+    int? actionIndexOrPlyIndex,
+  }) {
+    _logger.logBughuntEvent(
+      eventType,
+      payload: payload,
+      turnIndex: turnIndex,
+      actionIndexOrPlyIndex: actionIndexOrPlyIndex,
+    );
+  }
+
+  void invariantFailure({
+    required String code,
+    required String message,
+    required int turnIndex,
+    required int actionIndexOrPlyIndex,
+    Map<String, Object?> context = const <String, Object?>{},
+  }) {
+    _logger.recordInvariantFailure(
+      failureCode: code,
+      message: message,
+      turnIndex: turnIndex,
+      actionIndexOrPlyIndex: actionIndexOrPlyIndex,
+      context: context,
+    );
+  }
+
+  void complete({required _DuelSummary summary}) {
+    _logger.closeSession(
+      reason: summary.failures.isEmpty ? 'completed' : 'failed',
+      summary: <String, Object?>{
+        'games': summary.totalGames,
+        'whiteWins': summary.whiteWins,
+        'blackWins': summary.blackWins,
+        'draws': summary.draws,
+        'cappedGames': summary.cappedGames,
+        'conversionFailures': summary.conversionFailures,
+        'failures': summary.failures.length,
+      },
+    );
+  }
+}
+
 Never _printUsageAndExit() {
   print(
     'Usage: dart run tool/ai_duel.dart '
     '[--games=N] [--max-plies=N] [--seed=N] '
     '[--repeat-alert=N] [--halfmove-alert=N] '
     '[--conversion-fail-cap-adv=N] [--max-conversion-failures=N] '
-    '[--log-file=path] [--pgn-dir=path]',
+    '[--log-file=path] [--pgn-dir=path] [--run-id=id]',
   );
   exit(0);
 }
