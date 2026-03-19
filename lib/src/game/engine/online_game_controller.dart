@@ -646,7 +646,7 @@ class OnlineGameController extends ChangeNotifier {
       final sent = _sendMove(
         from: from,
         to: square,
-        promotion: legalMove['promotion'] as String?,
+        promotion: chosenPromotion,
         source: 'manual',
       );
       if (sent) {
@@ -960,7 +960,7 @@ class OnlineGameController extends ChangeNotifier {
     final sent = _sendMove(
       from: from,
       to: to,
-      promotion: legalMove['promotion'] as String?,
+      promotion: promotion,
       source: 'queued',
       queueToken: queueToken,
     );

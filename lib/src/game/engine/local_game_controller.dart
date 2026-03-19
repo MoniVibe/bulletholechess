@@ -438,7 +438,10 @@ class LocalGameController extends ChangeNotifier {
 
     final previousTurn = _game.turn;
     _game.turn = ChessRules.toChessColor(moverColor);
-    final payload = ChessRules.movePayloadFromLegalMove(legalMove);
+    final payload = ChessRules.movePayloadFromLegalMove(
+      legalMove,
+      fallbackPromotion: promotion,
+    );
     final moved = _game.move(payload);
 
     if (!moved) {
