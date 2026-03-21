@@ -87,7 +87,7 @@ jobs:
         run: flutter test
 
       - name: AI-vs-AI smoke duel
-        run: dart run tool/ai_duel.dart --games=150 --max-plies=240 --seed=20260226 --conversion-fail-cap-adv=5 --max-conversion-failures=3 --log-file=debug/ci-ai-duel-weird.jsonl --pgn-dir=debug/ci-ai-duel-weird-pgn
+        run: flutter pub run tool/ai_duel.dart --games=150 --max-plies=240 --seed=20260226 --conversion-fail-cap-adv=5 --max-conversion-failures=3 --log-file=debug/ci-ai-duel-weird.jsonl --pgn-dir=debug/ci-ai-duel-weird-pgn
 
       - name: Print AI duel debug snippet on failure
         if: failure()

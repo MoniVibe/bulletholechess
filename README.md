@@ -103,7 +103,7 @@ Optional CLI usage:
 ```powershell
 .\build-apk-split.ps1
 .\build-apk-split.ps1 -Clean
-.\build-apk-split.ps1 -FlutterExe "C:\dev\flutter\bin\flutter.bat"
+.\build-apk-split.ps1
 ```
 
 Output folder:

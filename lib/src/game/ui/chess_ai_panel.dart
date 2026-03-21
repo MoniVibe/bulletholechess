@@ -25,6 +25,7 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
   };
 
   late final ChessAiGameController _controller;
+  late final ScrollController _settingsScrollController;
   bool _menuOpen = true;
   String _selectedBoardSkinId = SkinCatalog.defaultChessBoardSkinId;
   String _selectedPlayerPieceSkinId = SkinCatalog.defaultChessPieceSkinId;
@@ -40,10 +41,12 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
       aiMoveDelay: _aiTestingDelay,
       initialCooldownDuration: Duration(seconds: _selectedCooldownSeconds),
     );
+    _settingsScrollController = ScrollController();
   }
 
   @override
   void dispose() {
+    _settingsScrollController.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -143,150 +146,160 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                   fallbackIcon: Icons.smart_toy_outlined,
                   size: 22,
                 ),
-                child: Column(
-                  children: [
-                    DropdownButtonFormField<_PlayAsChoice>(
-                      initialValue: _playAsChoice,
-                      decoration: const InputDecoration(
-                        labelText: 'Play As',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      items: const <DropdownMenuItem<_PlayAsChoice>>[
-                        DropdownMenuItem<_PlayAsChoice>(
-                          value: _PlayAsChoice.white,
-                          child: Text('White'),
-                        ),
-                        DropdownMenuItem<_PlayAsChoice>(
-                          value: _PlayAsChoice.black,
-                          child: Text('Black'),
-                        ),
-                        DropdownMenuItem<_PlayAsChoice>(
-                          value: _PlayAsChoice.random,
-                          child: Text('Random'),
-                        ),
-                      ],
-                      onChanged: (value) {
-                        if (value == null) {
-                          return;
-                        }
-                        setState(() {
-                          _playAsChoice = value;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<int>(
-                      initialValue: _selectedCooldownSeconds,
-                      decoration: const InputDecoration(
-                        labelText: 'Cooldown (seconds)',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      items: _cooldownOptionsSeconds
-                          .map(
-                            (seconds) => DropdownMenuItem<int>(
-                              value: seconds,
-                              child: Text('$seconds s'),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 320),
+                  child: Scrollbar(
+                    controller: _settingsScrollController,
+                    thumbVisibility: true,
+                    child: SingleChildScrollView(
+                      controller: _settingsScrollController,
+                      child: Column(
+                        children: [
+                          DropdownButtonFormField<_PlayAsChoice>(
+                            initialValue: _playAsChoice,
+                            decoration: const InputDecoration(
+                              labelText: 'Play As',
+                              border: OutlineInputBorder(),
+                              isDense: true,
                             ),
-                          )
-                          .toList(),
-                      onChanged: (value) {
-                        if (value == null) {
-                          return;
-                        }
-                        setState(() {
-                          _selectedCooldownSeconds = value;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    TimeBarOrientationSwitch(
-                      orientation: _timeBarOrientation,
-                      onChanged: (orientation) {
-                        setState(() {
-                          _timeBarOrientation = orientation;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<String>(
-                      key: ValueKey<String>(
-                        'chess_ai_board_skin_$_selectedBoardSkinId',
-                      ),
-                      initialValue: _selectedBoardSkinId,
-                      decoration: const InputDecoration(
-                        labelText: 'Select Board',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      items: _chessBoardDropdownItems(),
-                      onChanged: (value) {
-                        if (value == null) {
-                          return;
-                        }
-                        setState(() {
-                          _selectedBoardSkinId = value;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<String>(
-                      key: ValueKey<String>(
-                        'chess_ai_player_skin_$_selectedPlayerPieceSkinId',
-                      ),
-                      initialValue: _selectedPlayerPieceSkinId,
-                      decoration: const InputDecoration(
-                        labelText: 'Player Skin',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      items: SkinCatalog.chessPieceSkins
-                          .map(
-                            (skin) => DropdownMenuItem<String>(
-                              value: skin.id,
-                              enabled: _ownedChessPieceSkinIds.contains(
-                                skin.id,
+                            items: const <DropdownMenuItem<_PlayAsChoice>>[
+                              DropdownMenuItem<_PlayAsChoice>(
+                                value: _PlayAsChoice.white,
+                                child: Text('White'),
                               ),
-                              child: Text(
-                                _ownedChessPieceSkinIds.contains(skin.id)
-                                    ? skin.label
-                                    : '${skin.label} (Locked)',
+                              DropdownMenuItem<_PlayAsChoice>(
+                                value: _PlayAsChoice.black,
+                                child: Text('Black'),
                               ),
+                              DropdownMenuItem<_PlayAsChoice>(
+                                value: _PlayAsChoice.random,
+                                child: Text('Random'),
+                              ),
+                            ],
+                            onChanged: (value) {
+                              if (value == null) {
+                                return;
+                              }
+                              setState(() {
+                                _playAsChoice = value;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<int>(
+                            initialValue: _selectedCooldownSeconds,
+                            decoration: const InputDecoration(
+                              labelText: 'Cooldown (seconds)',
+                              border: OutlineInputBorder(),
+                              isDense: true,
                             ),
-                          )
-                          .toList(),
-                      onChanged: (value) {
-                        if (value == null) {
-                          return;
-                        }
-                        setState(() {
-                          _selectedPlayerPieceSkinId = value;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        key: const ValueKey<String>('chess_ai_new_game'),
-                        onPressed: () {
-                          _controller.startNewGame(
-                            playerAsWhite: _resolvePlayerAsWhite(),
-                            cooldownDuration: Duration(
-                              seconds: _selectedCooldownSeconds,
+                            items: _cooldownOptionsSeconds
+                                .map(
+                                  (seconds) => DropdownMenuItem<int>(
+                                    value: seconds,
+                                    child: Text('$seconds s'),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (value) {
+                              if (value == null) {
+                                return;
+                              }
+                              setState(() {
+                                _selectedCooldownSeconds = value;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          TimeBarOrientationSwitch(
+                            orientation: _timeBarOrientation,
+                            onChanged: (orientation) {
+                              setState(() {
+                                _timeBarOrientation = orientation;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<String>(
+                            key: ValueKey<String>(
+                              'chess_ai_board_skin_$_selectedBoardSkinId',
                             ),
-                          );
-                        },
-                        icon: const AppAssetIcon(
-                          AppAssets.newGameIcon,
-                          fallbackIcon: Icons.refresh,
-                          size: 18,
-                        ),
-                        label: const Text('New Game'),
+                            initialValue: _selectedBoardSkinId,
+                            decoration: const InputDecoration(
+                              labelText: 'Select Board',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            items: _chessBoardDropdownItems(),
+                            onChanged: (value) {
+                              if (value == null) {
+                                return;
+                              }
+                              setState(() {
+                                _selectedBoardSkinId = value;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<String>(
+                            key: ValueKey<String>(
+                              'chess_ai_player_skin_$_selectedPlayerPieceSkinId',
+                            ),
+                            initialValue: _selectedPlayerPieceSkinId,
+                            decoration: const InputDecoration(
+                              labelText: 'Player Skin',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            items: SkinCatalog.chessPieceSkins
+                                .map(
+                                  (skin) => DropdownMenuItem<String>(
+                                    value: skin.id,
+                                    enabled: _ownedChessPieceSkinIds.contains(
+                                      skin.id,
+                                    ),
+                                    child: Text(
+                                      _ownedChessPieceSkinIds.contains(skin.id)
+                                          ? skin.label
+                                          : '${skin.label} (Locked)',
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (value) {
+                              if (value == null) {
+                                return;
+                              }
+                              setState(() {
+                                _selectedPlayerPieceSkinId = value;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              key: const ValueKey<String>('chess_ai_new_game'),
+                              onPressed: () {
+                                _controller.startNewGame(
+                                  playerAsWhite: _resolvePlayerAsWhite(),
+                                  cooldownDuration: Duration(
+                                    seconds: _selectedCooldownSeconds,
+                                  ),
+                                );
+                              },
+                              icon: const AppAssetIcon(
+                                AppAssets.newGameIcon,
+                                fallbackIcon: Icons.refresh,
+                                size: 18,
+                              ),
+                              label: const Text('New Game'),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
+                  ),
                 ),
               ),
               const SizedBox(height: 10),
@@ -564,6 +577,35 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                       ),
                       const SizedBox(width: 8),
                       Expanded(child: Text(_controller.statusText)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Card(
+                color: Theme.of(
+                  context,
+                ).colorScheme.error.withValues(alpha: 0.16),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Note:',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _controller.feedback ?? '-',
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurface.withValues(alpha: 0.88),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),

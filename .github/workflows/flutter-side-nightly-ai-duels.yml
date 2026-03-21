@@ -57,7 +57,7 @@ jobs:
         run: flutter pub get
 
       - name: AI-vs-AI stress duel
-        run: dart run tool/ai_duel.dart --games=500 --max-plies=260 --seed=20260226 --conversion-fail-cap-adv=5 --max-conversion-failures=14 --log-file=debug/nightly-ai-duel-weird.jsonl --pgn-dir=debug/nightly-ai-duel-weird-pgn
+        run: flutter pub run tool/ai_duel.dart --games=500 --max-plies=260 --seed=20260226 --conversion-fail-cap-adv=5 --max-conversion-failures=14 --log-file=debug/nightly-ai-duel-weird.jsonl --pgn-dir=debug/nightly-ai-duel-weird-pgn
 
       - name: Print AI duel debug snippet on failure
         if: failure()

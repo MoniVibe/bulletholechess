@@ -144,8 +144,9 @@ class ChessRules {
   }
 
   static Map<String, String> movePayloadFromLegalMove(
-    Map<String, dynamic> legalMove,
-  ) {
+    Map<String, dynamic> legalMove, {
+    String fallbackPromotion = defaultPromotion,
+  }) {
     final from = legalMove['from'];
     final to = legalMove['to'];
     if (from is! String || to is! String) {
@@ -156,6 +157,8 @@ class ChessRules {
     final promotion = legalMove['promotion'];
     if (promotion is String && promotion.isNotEmpty) {
       payload['promotion'] = promotion;
+    } else if (_isPromotionMove(legalMove)) {
+      payload['promotion'] = fallbackPromotion;
     }
     return payload;
   }
@@ -216,5 +219,17 @@ class ChessRules {
     final file = square[0];
     final rank = int.tryParse(square[1]);
     return _files.contains(file) && rank != null && rank >= 1 && rank <= 8;
+  }
+
+  static bool _isPromotionMove(Map<String, dynamic> legalMove) {
+    final flags = legalMove['flags'];
+    if (flags is String && flags.contains('p')) {
+      return true;
+    }
+    final san = legalMove['san'];
+    if (san is String && san.contains('=')) {
+      return true;
+    }
+    return false;
   }
 }

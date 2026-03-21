@@ -110,7 +110,6 @@ class _GameScreenState extends State<GameScreen> {
         children: [
           Card(
             elevation: 0,
-            color: Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14),
             ),
@@ -376,7 +375,6 @@ class _GameScreenState extends State<GameScreen> {
           const SizedBox(height: 12),
           Card(
             elevation: 0,
-            color: Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14),
             ),

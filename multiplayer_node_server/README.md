@@ -20,6 +20,24 @@ This service provides:
 
 It runs matchmaking and authoritative move validation in one Node.js process.
 
+## Relay Protocol (Non-Chess gameType)
+
+For `gameType` values other than `chess` (for example `backgammon`), the
+backend uses a relay lane with minimal authoritative checks:
+
+- Client submit: `{ "type": "relay", "event": "...", "payload": { ... } }`
+- Server ack: `{ "type": "relay_ack", "sequence": N, "event": "...", ... }`
+- Server reject: `{ "type": "error", "code": "relay_*", "message": "..." }`
+- Broadcast state includes:
+  - `relayState` (last accepted relay envelope)
+  - `relayMeta.readyW`, `relayMeta.readyB`, `relayMeta.actionCount`
+
+Supported relay events for bughunt v1.1:
+
+- `ready`
+- `action` (requires payload: `kind`, `actionId`, `actorColor`)
+- `complete` (requires non-empty `result`)
+
 ## Run locally
 
 ```bash

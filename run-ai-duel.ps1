@@ -10,6 +10,33 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Resolve-FlutterExe {
+  param(
+    [string]$Explicit = ''
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($Explicit) -and (Test-Path $Explicit)) {
+    return $Explicit
+  }
+
+  $fromEnv = $env:BULLETHOLE_FLUTTER_EXE
+  if (-not [string]::IsNullOrWhiteSpace($fromEnv) -and (Test-Path $fromEnv)) {
+    return $fromEnv
+  }
+
+  $fromPath = Get-Command flutter -ErrorAction SilentlyContinue
+  if ($null -ne $fromPath -and -not [string]::IsNullOrWhiteSpace($fromPath.Source)) {
+    return $fromPath.Source
+  }
+
+  $legacy = 'C:\dev\flutter\bin\flutter.bat'
+  if (Test-Path $legacy) {
+    return $legacy
+  }
+
+  throw 'Flutter executable not found. Put `flutter` on PATH or set BULLETHOLE_FLUTTER_EXE.'
+}
+
 if ($Games -le 0) {
   throw 'Games must be greater than 0.'
 }
@@ -24,8 +51,7 @@ if ($MaxConversionFailures -lt -1) {
 }
 
 $repoRoot = $PSScriptRoot
-$dartDefault = 'C:\dev\flutter\bin\dart.bat'
-$dartExe = if (Test-Path $dartDefault) { $dartDefault } else { 'dart' }
+$dartExe = Resolve-FlutterExe
 
 if ($Seed -le 0) {
   $Seed = Get-Random -Minimum 1 -Maximum 2147483647
@@ -42,7 +68,7 @@ Write-Host "ConversionFailCapAdv: $ConversionFailCapAdv | MaxConversionFailures:
 Write-Host "Log file: $logFilePath"
 Write-Host ''
 
-& $dartExe run tool\ai_duel.dart --games=$Games --max-plies=$MaxPlies --seed=$Seed --conversion-fail-cap-adv=$ConversionFailCapAdv --max-conversion-failures=$MaxConversionFailures --log-file="$logFilePath"
+& $dartExe pub run tool\ai_duel.dart --games=$Games --max-plies=$MaxPlies --seed=$Seed --conversion-fail-cap-adv=$ConversionFailCapAdv --max-conversion-failures=$MaxConversionFailures --log-file="$logFilePath"
 $exitCode = $LASTEXITCODE
 
 if ($exitCode -ne 0) {

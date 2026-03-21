@@ -57,6 +57,32 @@ void main() {
     });
   });
 
+  test(
+    'movePayloadFromLegalMove injects fallback promotion when legal move omits promotion field',
+    () {
+      final game = chess.Chess();
+      final loaded = game.load('8/P7/8/8/8/8/8/k6K w - - 0 1');
+      expect(loaded, isTrue);
+
+      final legalMove = ChessRules.findValidatedLegalMove(
+        game: game,
+        from: 'a7',
+        to: 'a8',
+        color: 'w',
+        promotion: ChessRules.defaultPromotion,
+      );
+      expect(legalMove, isNotNull);
+
+      final payload = ChessRules.movePayloadFromLegalMove(legalMove!);
+      expect(payload['promotion'], ChessRules.defaultPromotion);
+
+      final moved = game.move(payload);
+      expect(moved, isTrue);
+      expect(game.get('a8')?.type.toString().toLowerCase(), contains('q'));
+      expect(game.get('a8')?.color, chess.Color.WHITE);
+    },
+  );
+
   test('legal king move list excludes adjacent enemy-king squares', () {
     final game = chess.Chess();
     final loaded = game.load('8/8/8/8/8/4k3/8/4K3 w - - 0 1');

@@ -20,6 +20,9 @@ const MAX_COOLDOWN_SECONDS = 30;
 const DEFAULT_PIECE_SKIN_ID = 'chess_classic';
 const DEFAULT_GAME_TYPE = 'chess';
 const GAME_TYPE_CHESS = 'chess';
+const RELAY_EVENT_READY = 'ready';
+const RELAY_EVENT_ACTION = 'action';
+const RELAY_EVENT_COMPLETE = 'complete';
 const MAX_PIECE_SKIN_ID_LENGTH = 40;
 const PIECE_SKIN_ID_PATTERN = /^[a-z0-9_-]+$/;
 const MATCH_TTL_MS = Number.parseInt(process.env.MATCH_TTL_MS || '0', 10);
@@ -210,7 +213,7 @@ wss.on('connection', (socket, req) => {
     if (match.gameType === GAME_TYPE_CHESS) {
       match.game = new Chess();
     } else {
-      match.relayState = null;
+      resetRelaySession(match);
     }
     const now = Date.now();
     match.cooldownEndsAt.w = now;
@@ -787,21 +790,144 @@ function handleRelaySocketMessage({ match, color, socket, payload }) {
   const type = typeof payload.type === 'string' ? payload.type : '';
   switch (type) {
     case 'relay': {
-      const event = sanitizeGameType(payload.event);
+      if (!match.players.white || !match.players.black) {
+        sendJson(socket, {
+          type: 'error',
+          code: 'waiting_for_opponent',
+          message: 'Waiting for opponent.',
+          relayMeta: relayMetaPayload(match),
+          serverNow: Date.now(),
+        });
+        return;
+      }
+
+      const event = sanitizeRelayEvent(payload.event);
       const relayPayload =
         payload.payload && typeof payload.payload === 'object'
           ? payload.payload
-          : {};
+          : null;
       const stateHash =
         typeof payload.stateHash === 'string' ? payload.stateHash.trim() : '';
       const result =
         typeof payload.result === 'string' ? payload.result.trim() : null;
 
-      if (!match.players.white || !match.players.black) {
-        sendJson(socket, { type: 'error', message: 'Waiting for opponent.' });
+      if (!event) {
+        logEvent('relay_rejected', {
+          matchId: match.matchId,
+          gameType: match.gameType,
+          color,
+          reason: 'invalid_event',
+          event: payload.event,
+        });
+        sendJson(socket, {
+          type: 'error',
+          code: 'relay_invalid_event',
+          message: 'Relay event is required.',
+          relayMeta: relayMetaPayload(match),
+          serverNow: Date.now(),
+        });
+        return;
+      }
+      if (!relayPayload) {
+        logEvent('relay_rejected', {
+          matchId: match.matchId,
+          gameType: match.gameType,
+          color,
+          reason: 'invalid_payload',
+          event,
+        });
+        sendJson(socket, {
+          type: 'error',
+          code: 'relay_invalid_payload',
+          message: 'Relay payload must be an object.',
+          event,
+          relayMeta: relayMetaPayload(match),
+          serverNow: Date.now(),
+        });
         return;
       }
 
+      if (event === RELAY_EVENT_READY) {
+        match.relayReady[color] = true;
+      } else if (event === RELAY_EVENT_ACTION) {
+        if (!isRelaySessionReady(match)) {
+          logEvent('relay_rejected', {
+            matchId: match.matchId,
+            gameType: match.gameType,
+            color,
+            reason: 'not_ready',
+            event,
+          });
+          sendJson(socket, {
+            type: 'error',
+            code: 'relay_not_ready',
+            message: 'Both players must send ready before actions.',
+            event,
+            relayMeta: relayMetaPayload(match),
+            serverNow: Date.now(),
+          });
+          return;
+        }
+        if (!isValidRelayActionPayload(relayPayload, color)) {
+          logEvent('relay_rejected', {
+            matchId: match.matchId,
+            gameType: match.gameType,
+            color,
+            reason: 'invalid_action_payload',
+            event,
+          });
+          sendJson(socket, {
+            type: 'error',
+            code: 'relay_invalid_action',
+            message:
+              'Relay action payload must include kind, actionId, and actorColor.',
+            event,
+            relayMeta: relayMetaPayload(match),
+            serverNow: Date.now(),
+          });
+          return;
+        }
+        match.relayActionCount += 1;
+      } else if (event === RELAY_EVENT_COMPLETE) {
+        if (!isRelaySessionReady(match)) {
+          logEvent('relay_rejected', {
+            matchId: match.matchId,
+            gameType: match.gameType,
+            color,
+            reason: 'not_ready',
+            event,
+          });
+          sendJson(socket, {
+            type: 'error',
+            code: 'relay_not_ready',
+            message: 'Cannot complete session before both sides are ready.',
+            event,
+            relayMeta: relayMetaPayload(match),
+            serverNow: Date.now(),
+          });
+          return;
+        }
+        if (!result) {
+          logEvent('relay_rejected', {
+            matchId: match.matchId,
+            gameType: match.gameType,
+            color,
+            reason: 'missing_result',
+            event,
+          });
+          sendJson(socket, {
+            type: 'error',
+            code: 'relay_missing_result',
+            message: 'Relay completion requires a non-empty result.',
+            event,
+            relayMeta: relayMetaPayload(match),
+            serverNow: Date.now(),
+          });
+          return;
+        }
+      }
+
+      const relayResult = event === RELAY_EVENT_COMPLETE ? result : null;
       match.updatedAt = Date.now();
       match.sequence += 1;
       const relayMessage = {
@@ -813,26 +939,41 @@ function handleRelaySocketMessage({ match, color, socket, payload }) {
         event: event ?? null,
         payload: relayPayload,
         stateHash: stateHash || null,
-        result,
+        result: relayResult,
         serverNow: Date.now(),
+        relayMeta: relayMetaPayload(match),
       };
       match.relayState = {
         fromColor: color,
-        event: event ?? null,
+        event,
         payload: relayPayload,
         stateHash: stateHash || null,
-        result,
+        result: relayResult,
         at: relayMessage.serverNow,
       };
+      sendJson(socket, {
+        type: 'relay_ack',
+        sequence: match.sequence,
+        matchId: match.matchId,
+        gameType: match.gameType,
+        fromColor: color,
+        event,
+        stateHash: stateHash || null,
+        result: relayResult,
+        relayMeta: relayMetaPayload(match),
+        serverNow: relayMessage.serverNow,
+      });
       logEvent('relay_message', {
         matchId: match.matchId,
         gameType: match.gameType,
         fromColor: color,
-        event: event ?? null,
+        event,
         stateHash: stateHash || null,
-        hasResult: Boolean(result),
+        hasResult: Boolean(relayResult),
+        relayMeta: relayMetaPayload(match),
       });
       broadcastToConnected(match, relayMessage);
+      broadcastState(match);
       return;
     }
     case 'new_game': {
@@ -844,7 +985,7 @@ function handleRelaySocketMessage({ match, color, socket, payload }) {
       match.cooldownEndsAt.w = now;
       match.cooldownEndsAt.b = now;
       clearForfeitLock(match);
-      match.relayState = null;
+      resetRelaySession(match);
       match.updatedAt = now;
       logEvent('new_game', {
         matchId: match.matchId,
@@ -927,6 +1068,8 @@ function createEmptyMatch({ matchId, cooldownMs, gameType }) {
     playersById: new Map(),
     game: gameType === GAME_TYPE_CHESS ? new Chess() : null,
     relayState: null,
+    relayReady: { w: false, b: false },
+    relayActionCount: 0,
     sequence: 0,
     cooldownMs,
     cooldownEndsAt: { w: now, b: now },
@@ -1011,6 +1154,7 @@ function broadcastState(match, lastMove = null) {
     cooldownEndsAt: match.cooldownEndsAt,
     forfeitLock: serializeForfeitLock(match.forfeitLock),
     relayState: match.relayState,
+    relayMeta: relayMetaPayload(match),
     result: relayResult,
     serverNow: Date.now(),
   };
@@ -1070,6 +1214,48 @@ function pruneExpiredMatches() {
       });
     }
   }
+}
+
+function resetRelaySession(match) {
+  match.relayState = null;
+  match.relayReady = { w: false, b: false };
+  match.relayActionCount = 0;
+}
+
+function isRelaySessionReady(match) {
+  return Boolean(match.relayReady?.w) && Boolean(match.relayReady?.b);
+}
+
+function relayMetaPayload(match) {
+  return {
+    readyW: Boolean(match.relayReady?.w),
+    readyB: Boolean(match.relayReady?.b),
+    actionCount: Number.isFinite(match.relayActionCount)
+      ? match.relayActionCount
+      : 0,
+  };
+}
+
+function isValidRelayActionPayload(payload, color) {
+  if (!payload || typeof payload !== 'object') {
+    return false;
+  }
+  const kind = sanitizeRelayEvent(payload.kind);
+  const actionId = sanitizeMoveId(payload.actionId);
+  const actorColor =
+    typeof payload.actorColor === 'string'
+      ? payload.actorColor.trim().toLowerCase()
+      : '';
+  if (!kind || actionId === null) {
+    return false;
+  }
+  if (!['w', 'b'].includes(actorColor)) {
+    return false;
+  }
+  if (actorColor !== color) {
+    return false;
+  }
+  return true;
 }
 
 function setCooldownForMover(match, moverColor, atMs) {
@@ -1186,10 +1372,25 @@ function applyMoveAsColor(game, color, movePayload) {
 function cloneGameWithTurn(game, color) {
   const fen = game.fen();
   const parts = fen.split(' ');
-  if (parts.length >= 2) {
+  if (parts.length >= 6) {
+    const originalTurn = parts[1];
     parts[1] = color;
+    if (originalTurn !== color) {
+      // If we force-turn to the opposite color, stale en-passant squares can
+      // become illegal in chess.js for that turn.
+      parts[3] = '-';
+    }
   }
-  return new Chess(parts.join(' '));
+  try {
+    return new Chess(parts.join(' '));
+  } catch (_error) {
+    // Last-resort normalization keeps the backend alive for diagnostics runs.
+    if (parts.length >= 6) {
+      const fallbackFen = [parts[0], parts[1], parts[2], '-', parts[4], parts[5]].join(' ');
+      return new Chess(fallbackFen);
+    }
+    return new Chess(fen);
+  }
 }
 
 function sanitizeName(value) {
@@ -1216,6 +1417,10 @@ function sanitizeGameType(value) {
     return null;
   }
   return normalized;
+}
+
+function sanitizeRelayEvent(value) {
+  return sanitizeGameType(value);
 }
 
 function sanitizeCooldownSeconds(value) {

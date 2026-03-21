@@ -34,7 +34,9 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
   };
 
   late final OnlineGameController _controller;
+  late final TextEditingController _apiBaseController;
   late final TextEditingController _nameController;
+  late final ScrollController _matchSettingsScrollController;
 
   bool _connecting = false;
   bool _backendActionInFlight = false;
@@ -47,12 +49,18 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
   void initState() {
     super.initState();
     _controller = OnlineGameController();
+    _apiBaseController = TextEditingController(
+      text: AppRuntimeConfig.defaultBackendUrl,
+    );
     _nameController = TextEditingController(text: 'Player');
+    _matchSettingsScrollController = ScrollController();
     _checkBackendHealth();
   }
 
   @override
   void dispose() {
+    _matchSettingsScrollController.dispose();
+    _apiBaseController.dispose();
     _nameController.dispose();
     _controller.dispose();
     super.dispose();
@@ -150,187 +158,215 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
                         },
                       )
                     : null,
-                child: Column(
-                  children: [
-                    TextField(
-                      key: const ValueKey<String>('chess_online_display_name'),
-                      controller: _nameController,
-                      decoration: const InputDecoration(
-                        labelText: 'Display Name',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<int>(
-                      initialValue: _selectedCooldownSeconds,
-                      decoration: const InputDecoration(
-                        labelText: 'Cooldown (seconds)',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      items: _cooldownOptionsSeconds
-                          .map(
-                            (seconds) => DropdownMenuItem<int>(
-                              value: seconds,
-                              child: Text('$seconds s'),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 320),
+                  child: Scrollbar(
+                    controller: _matchSettingsScrollController,
+                    thumbVisibility: true,
+                    child: SingleChildScrollView(
+                      controller: _matchSettingsScrollController,
+                      child: Column(
+                        children: [
+                          TextField(
+                            key: const ValueKey<String>(
+                              'chess_online_backend_url',
                             ),
-                          )
-                          .toList(),
-                      onChanged: connected
-                          ? null
-                          : (value) {
+                            controller: _apiBaseController,
+                            decoration: const InputDecoration(
+                              labelText: 'Backend URL',
+                              hintText: 'https://your-backend.example.com',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          TextField(
+                            key: const ValueKey<String>(
+                              'chess_online_display_name',
+                            ),
+                            controller: _nameController,
+                            decoration: const InputDecoration(
+                              labelText: 'Display Name',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<int>(
+                            initialValue: _selectedCooldownSeconds,
+                            decoration: const InputDecoration(
+                              labelText: 'Cooldown (seconds)',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            items: _cooldownOptionsSeconds
+                                .map(
+                                  (seconds) => DropdownMenuItem<int>(
+                                    value: seconds,
+                                    child: Text('$seconds s'),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: connected
+                                ? null
+                                : (value) {
+                                    if (value == null) {
+                                      return;
+                                    }
+                                    setState(() {
+                                      _selectedCooldownSeconds = value;
+                                    });
+                                  },
+                          ),
+                          const SizedBox(height: 8),
+                          TimeBarOrientationSwitch(
+                            orientation: _timeBarOrientation,
+                            onChanged: (orientation) {
+                              setState(() {
+                                _timeBarOrientation = orientation;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<String>(
+                            key: ValueKey<String>(
+                              'chess_board_skin_$_selectedChessBoardSkinId',
+                            ),
+                            initialValue: _selectedChessBoardSkinId,
+                            decoration: const InputDecoration(
+                              labelText: 'Select Board',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            items: _chessBoardDropdownItems(),
+                            onChanged: (value) {
                               if (value == null) {
                                 return;
                               }
                               setState(() {
-                                _selectedCooldownSeconds = value;
+                                _selectedChessBoardSkinId = value;
                               });
                             },
-                    ),
-                    const SizedBox(height: 8),
-                    TimeBarOrientationSwitch(
-                      orientation: _timeBarOrientation,
-                      onChanged: (orientation) {
-                        setState(() {
-                          _timeBarOrientation = orientation;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<String>(
-                      key: ValueKey<String>(
-                        'chess_board_skin_$_selectedChessBoardSkinId',
-                      ),
-                      initialValue: _selectedChessBoardSkinId,
-                      decoration: const InputDecoration(
-                        labelText: 'Select Board',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      items: _chessBoardDropdownItems(),
-                      onChanged: (value) {
-                        if (value == null) {
-                          return;
-                        }
-                        setState(() {
-                          _selectedChessBoardSkinId = value;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<String>(
-                      key: ValueKey<String>('my_piece_skin_$myPieceSkinId'),
-                      initialValue: myPieceSkinId,
-                      decoration: const InputDecoration(
-                        labelText: 'Player Skin',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      items: SkinCatalog.chessPieceSkins
-                          .map(
-                            (skin) => DropdownMenuItem<String>(
-                              value: skin.id,
-                              enabled: _ownedChessPieceSkinIds.contains(
-                                skin.id,
-                              ),
-                              child: Text(
-                                _ownedChessPieceSkinIds.contains(skin.id)
-                                    ? skin.label
-                                    : '${skin.label} (Locked)',
-                              ),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) {
-                        if (value == null) {
-                          return;
-                        }
-                        _controller.setMyPieceSkin(value);
-                      },
-                    ),
-                    const SizedBox(height: 6),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'Opponent piece skin is server-driven and read-only on your side. If both players pick the same skin, black auto-inverts for clarity.',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF6A635A),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: FilledButton.icon(
-                            key: const ValueKey<String>(
-                              'chess_online_find_match',
-                            ),
-                            onPressed: canStart ? _findMatch : null,
-                            icon: const AppAssetIcon(
-                              AppAssets.newGameIcon,
-                              fallbackIcon: Icons.groups_2_outlined,
-                              size: 20,
-                            ),
-                            label: const Text('Find Match'),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton(
-                            key: const ValueKey<String>(
-                              'chess_online_disconnect',
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<String>(
+                            key: ValueKey<String>(
+                              'my_piece_skin_$myPieceSkinId',
                             ),
-                            onPressed: connected ? _disconnect : null,
-                            child: const Text('Disconnect'),
+                            initialValue: myPieceSkinId,
+                            decoration: const InputDecoration(
+                              labelText: 'Player Skin',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            items: SkinCatalog.chessPieceSkins
+                                .map(
+                                  (skin) => DropdownMenuItem<String>(
+                                    value: skin.id,
+                                    enabled: _ownedChessPieceSkinIds.contains(
+                                      skin.id,
+                                    ),
+                                    child: Text(
+                                      _ownedChessPieceSkinIds.contains(skin.id)
+                                          ? skin.label
+                                          : '${skin.label} (Locked)',
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (value) {
+                              if (value == null) {
+                                return;
+                              }
+                              _controller.setMyPieceSkin(value);
+                            },
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    _BackendHealthCard(
-                      state: _controller.backendHealthState,
-                      message: _controller.backendHealthMessage,
-                      checkedAt: _controller.backendHealthCheckedAt,
-                      busy: _backendActionInFlight,
-                      onCheckPressed: _checkBackendHealth,
-                      onWakePressed: _wakeBackend,
-                    ),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: OutlinedButton.icon(
-                        key: const ValueKey<String>('chess_online_new_game'),
-                        onPressed: connected
-                            ? () => _controller.requestNewGame(
-                                cooldownSeconds: _selectedCooldownSeconds,
-                              )
-                            : null,
-                        icon: const AppAssetIcon(
-                          AppAssets.rematchIcon,
-                          fallbackIcon: Icons.replay,
-                          size: 18,
-                        ),
-                        label: const Text('Request New Game'),
+                          const SizedBox(height: 6),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'Opponent piece skin is server-driven and read-only on your side. If both players pick the same skin, black auto-inverts for clarity.',
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: const Color(0xFF6A635A)),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: FilledButton.icon(
+                                  key: const ValueKey<String>(
+                                    'chess_online_find_match',
+                                  ),
+                                  onPressed: canStart ? _findMatch : null,
+                                  icon: const AppAssetIcon(
+                                    AppAssets.newGameIcon,
+                                    fallbackIcon: Icons.groups_2_outlined,
+                                    size: 20,
+                                  ),
+                                  label: const Text('Find Match'),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: OutlinedButton(
+                                  key: const ValueKey<String>(
+                                    'chess_online_disconnect',
+                                  ),
+                                  onPressed: connected ? _disconnect : null,
+                                  child: const Text('Disconnect'),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          _BackendHealthCard(
+                            state: _controller.backendHealthState,
+                            message: _controller.backendHealthMessage,
+                            checkedAt: _controller.backendHealthCheckedAt,
+                            busy: _backendActionInFlight,
+                            onCheckPressed: _checkBackendHealth,
+                            onWakePressed: _wakeBackend,
+                          ),
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: OutlinedButton.icon(
+                              key: const ValueKey<String>(
+                                'chess_online_new_game',
+                              ),
+                              onPressed: connected
+                                  ? () => _controller.requestNewGame(
+                                      cooldownSeconds: _selectedCooldownSeconds,
+                                    )
+                                  : null,
+                              icon: const AppAssetIcon(
+                                AppAssets.rematchIcon,
+                                fallbackIcon: Icons.replay,
+                                size: 18,
+                              ),
+                              label: const Text('Request New Game'),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: OutlinedButton.icon(
+                              onPressed: _controller.hasQueuedMove
+                                  ? _controller.clearQueuedMove
+                                  : null,
+                              icon: const Icon(Icons.clear_all, size: 18),
+                              label: Text(
+                                _controller.hasQueuedMove
+                                    ? 'Clear Queue (${_controller.queuedMoveLabel})'
+                                    : 'Clear Queue',
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: OutlinedButton.icon(
-                        onPressed: _controller.hasQueuedMove
-                            ? _controller.clearQueuedMove
-                            : null,
-                        icon: const Icon(Icons.clear_all, size: 18),
-                        label: Text(
-                          _controller.hasQueuedMove
-                              ? 'Clear Queue (${_controller.queuedMoveLabel})'
-                              : 'Clear Queue',
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
               const SizedBox(height: 10),
@@ -907,7 +943,7 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
 
     try {
       await _controller.findMatch(
-        apiBaseUrl: AppRuntimeConfig.defaultBackendUrl,
+        apiBaseUrl: _resolvedApiBaseUrl(),
         displayName: _nameController.text,
         cooldownSeconds: _selectedCooldownSeconds,
       );
@@ -933,9 +969,7 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
       _backendActionInFlight = true;
     });
     try {
-      await _controller.checkBackendHealth(
-        apiBaseUrl: AppRuntimeConfig.defaultBackendUrl,
-      );
+      await _controller.checkBackendHealth(apiBaseUrl: _resolvedApiBaseUrl());
     } finally {
       if (mounted) {
         setState(() {
@@ -953,9 +987,7 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
       _backendActionInFlight = true;
     });
     try {
-      await _controller.wakeBackend(
-        apiBaseUrl: AppRuntimeConfig.defaultBackendUrl,
-      );
+      await _controller.wakeBackend(apiBaseUrl: _resolvedApiBaseUrl());
     } finally {
       if (mounted) {
         setState(() {
@@ -963,6 +995,14 @@ class _OnlineGamePanelState extends State<OnlineGamePanel> {
         });
       }
     }
+  }
+
+  String _resolvedApiBaseUrl() {
+    final trimmed = _apiBaseController.text.trim();
+    if (trimmed.isEmpty) {
+      return AppRuntimeConfig.defaultBackendUrl;
+    }
+    return trimmed;
   }
 }
 

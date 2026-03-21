@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:bullethole_shared/bullethole_shared_runtime.dart';
 import 'package:chess/chess.dart' as chess;
 import 'package:flutter/foundation.dart';
 
@@ -16,9 +17,11 @@ class LocalGameController extends ChangeNotifier {
     this.aiThinkDelayMax = const Duration(seconds: 4),
     DumbAiEngine? aiEngine,
     Random? random,
+    DateTime Function()? nowProvider,
   }) : _random = random ?? Random(),
        _aiEngine = aiEngine ?? DumbAiEngine(random: random ?? Random()),
-       _cooldownDuration = initialCooldownDuration {
+       _cooldownDuration = initialCooldownDuration,
+       _now = nowProvider ?? DateTime.now {
     _resetRuntimeState(activateGame: false);
     _ticker = Timer.periodic(
       const Duration(milliseconds: 200),
@@ -31,6 +34,12 @@ class LocalGameController extends ChangeNotifier {
   final Duration aiThinkDelayMax;
   final Random _random;
   final DumbAiEngine _aiEngine;
+  final DateTime Function() _now;
+  final GameSessionLogger _sessionLogger = GameSessionLogger(
+    applicationId: 'bulletholechess',
+    gameId: 'chess',
+    mode: 'local_duel',
+  );
 
   late chess.Chess _game;
   late Timer _ticker;
@@ -41,8 +50,8 @@ class LocalGameController extends ChangeNotifier {
 
   String _playerColor = 'w';
   int _version = 0;
-  DateTime _whiteReadyAt = DateTime.now();
-  DateTime _blackReadyAt = DateTime.now();
+  late DateTime _whiteReadyAt;
+  late DateTime _blackReadyAt;
   String? _selectedSquare;
   Set<String> _legalTargets = <String>{};
   String? _playerLastMoveFrom;
@@ -175,7 +184,7 @@ class LocalGameController extends ChangeNotifier {
   }
 
   Duration cooldownRemaining(String color) {
-    final now = DateTime.now();
+    final now = _now();
     final readyAt = color == 'w' ? _whiteReadyAt : _blackReadyAt;
     final remaining = readyAt.difference(now);
     if (remaining.isNegative) {
@@ -190,7 +199,26 @@ class LocalGameController extends ChangeNotifier {
     if (cooldownDuration != null) {
       _cooldownDuration = cooldownDuration;
     }
+    _sessionLogger.beginSession(
+      sessionLabel: 'new_game',
+      context: <String, Object?>{
+        'playerAsWhite': playerAsWhite,
+        'cooldownSeconds': _cooldownDuration.inSeconds,
+      },
+    );
     _resetRuntimeState(activateGame: true);
+    _sessionLogger.logEvent('new_game_started', data: _sessionSnapshot());
+    _sessionLogger.logBughuntEvent(
+      'turn_started',
+      payload: <String, Object?>{'turnColor': turnColor, ..._sessionSnapshot()},
+      turnIndex: _derivedTurnIndex(),
+      actionIndexOrPlyIndex: _derivedActionIndex(),
+    );
+    _sessionLogger.recordStateSnapshot(
+      _sessionSnapshot(),
+      turnIndex: _derivedTurnIndex(),
+      actionIndexOrPlyIndex: _derivedActionIndex(),
+    );
     _maybeScheduleAiMove();
     notifyListeners();
   }
@@ -275,17 +303,6 @@ class LocalGameController extends ChangeNotifier {
     }
 
     if (isOwnPiece) {
-      final onCooldown =
-          cooldownRemaining(playerColor).inMilliseconds > 0 ||
-          _isBlockedByForfeitLock(playerColor);
-      if (onCooldown && _selectedSquare != square) {
-        // Allow speculative queueing (e.g. predicted recapture) while cooling down.
-        _queuePlayerMove(from: from, to: square, promotion: _defaultPromotion);
-        _clearSelection();
-        _feedback = null;
-        notifyListeners();
-        return;
-      }
       _selectedSquare = square;
       _legalTargets = ChessRules.legalDestinationsFrom(
         game: _game,
@@ -303,6 +320,10 @@ class LocalGameController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _sessionLogger.closeSession(
+      reason: 'controller_dispose',
+      summary: _sessionSnapshot(),
+    );
     _disposed = true;
     _ticker.cancel();
     _cancelAiTimer();
@@ -383,7 +404,7 @@ class LocalGameController extends ChangeNotifier {
     _queuedPromotion = _defaultPromotion;
     _winnerColor = null;
 
-    final now = DateTime.now();
+    final now = _now();
     _whiteReadyAt = now;
     _blackReadyAt = now;
     _clearForfeitLock();
@@ -417,7 +438,10 @@ class LocalGameController extends ChangeNotifier {
 
     final previousTurn = _game.turn;
     _game.turn = ChessRules.toChessColor(moverColor);
-    final payload = ChessRules.movePayloadFromLegalMove(legalMove);
+    final payload = ChessRules.movePayloadFromLegalMove(
+      legalMove,
+      fallbackPromotion: promotion,
+    );
     final moved = _game.move(payload);
 
     if (!moved) {
@@ -445,11 +469,41 @@ class LocalGameController extends ChangeNotifier {
     );
     _refreshSelectionForCurrentBoard();
     _refreshTerminalState();
+    _sessionLogger.logEvent(
+      'move_applied',
+      data: <String, Object?>{
+        ..._sessionSnapshot(),
+        'moverColor': moverColor,
+        'from': from,
+        'to': to,
+        'promotion': promotion,
+      },
+    );
+    _sessionLogger.logBughuntEvent(
+      'turn_ended',
+      payload: <String, Object?>{
+        'moverColor': moverColor,
+        ..._sessionSnapshot(),
+      },
+      turnIndex: _derivedTurnIndex(),
+      actionIndexOrPlyIndex: _derivedActionIndex(),
+    );
+    _sessionLogger.logBughuntEvent(
+      'turn_started',
+      payload: <String, Object?>{'turnColor': turnColor, ..._sessionSnapshot()},
+      turnIndex: _derivedTurnIndex(),
+      actionIndexOrPlyIndex: _derivedActionIndex(),
+    );
+    _sessionLogger.recordStateSnapshot(
+      _sessionSnapshot(),
+      turnIndex: _derivedTurnIndex(),
+      actionIndexOrPlyIndex: _derivedActionIndex(),
+    );
     return true;
   }
 
   void _setCooldownForMover(String mover) {
-    final now = DateTime.now();
+    final now = _now();
     if (mover == 'w') {
       _whiteReadyAt = now.add(_cooldownDuration);
       return;
@@ -471,12 +525,38 @@ class LocalGameController extends ChangeNotifier {
     _queuedMoveFrom = from;
     _queuedMoveTo = to;
     _queuedPromotion = promotion;
+    _sessionLogger.logBughuntEvent(
+      'action_queued',
+      payload: <String, Object?>{
+        'from': from,
+        'to': to,
+        'promotion': promotion,
+        ..._sessionSnapshot(),
+      },
+      turnIndex: _derivedTurnIndex(),
+      actionIndexOrPlyIndex: _derivedActionIndex(),
+    );
   }
 
   void _clearQueuedMove() {
+    final hadQueue = hasQueuedMove;
+    final from = _queuedMoveFrom;
+    final to = _queuedMoveTo;
     _queuedMoveFrom = null;
     _queuedMoveTo = null;
     _queuedPromotion = _defaultPromotion;
+    if (hadQueue) {
+      _sessionLogger.logBughuntEvent(
+        'action_cancelled',
+        payload: <String, Object?>{
+          'from': from,
+          'to': to,
+          ..._sessionSnapshot(),
+        },
+        turnIndex: _derivedTurnIndex(),
+        actionIndexOrPlyIndex: _derivedActionIndex(),
+      );
+    }
   }
 
   void _tryExecuteQueuedPlayerMove() {
@@ -504,6 +584,18 @@ class LocalGameController extends ChangeNotifier {
     if (legalMove == null) {
       _clearQueuedMove();
       _feedback = null;
+      _sessionLogger.logBughuntEvent(
+        'action_rejected',
+        payload: <String, Object?>{
+          'from': from,
+          'to': to,
+          'reason': 'queued_move_invalidated',
+          ..._sessionSnapshot(),
+        },
+        severity: BughuntSeverity.warn,
+        turnIndex: _derivedTurnIndex(),
+        actionIndexOrPlyIndex: _derivedActionIndex(),
+      );
       return;
     }
 
@@ -627,5 +719,28 @@ class LocalGameController extends ChangeNotifier {
     }
     final delta = _random.nextInt(maxMs - minMs + 1);
     return Duration(milliseconds: minMs + delta);
+  }
+
+  int _derivedActionIndex() => _game.getHistory().length;
+
+  int _derivedTurnIndex() => (_derivedActionIndex() ~/ 2) + 1;
+
+  Map<String, Object?> _sessionSnapshot() {
+    return <String, Object?>{
+      'turnIndex': _derivedTurnIndex(),
+      'actionIndexOrPlyIndex': _derivedActionIndex(),
+      'playerColor': _playerColor,
+      'turnColor': turnColor,
+      'hasActiveGame': _hasActiveGame,
+      'isGameOver': isGameOver,
+      'winnerColor': _winnerColor,
+      'historyLen': _game.getHistory().length,
+      'fen': _game.fen,
+      'cooldownSeconds': _cooldownDuration.inSeconds,
+      'whiteRemainingMs': cooldownRemaining('w').inMilliseconds,
+      'blackRemainingMs': cooldownRemaining('b').inMilliseconds,
+      'feedback': _feedback,
+      'queuedMove': queuedMoveLabel,
+    };
   }
 }
