@@ -28,6 +28,10 @@ const PIECE_SKIN_ID_PATTERN = /^[a-z0-9_-]+$/;
 const MATCH_TTL_MS = Number.parseInt(process.env.MATCH_TTL_MS || '0', 10);
 const MATCH_TIMEOUT_ENABLED =
   Number.isFinite(MATCH_TTL_MS) && MATCH_TTL_MS > 0;
+const MATCH_CONNECT_GRACE_MS = Number.parseInt(
+  process.env.MATCH_CONNECT_GRACE_MS || '15000',
+  10,
+);
 const MAX_SERVER_LOGS = Number.parseInt(process.env.MAX_SERVER_LOGS || '500', 10);
 
 const app = express();
@@ -149,6 +153,10 @@ wss.on('connection', (socket, req) => {
     player.socket.close(1000, 'Replaced by new connection');
   }
 
+  if (!Number.isFinite(player.joinedAt)) {
+    player.joinedAt = Date.now();
+  }
+  player.hasConnected = true;
   player.socket = socket;
   match.updatedAt = Date.now();
   logEvent('ws_connected', {
@@ -273,6 +281,7 @@ function joinOrCreate(req, res) {
     sanitizePieceSkinId(req.body?.pieceSkinId) ?? DEFAULT_PIECE_SKIN_ID;
 
   pruneExpiredMatches();
+  pruneStaleUnconnectedReservations();
   const assignment = assignPlayerToMatch(
     name,
     gameType,
@@ -311,7 +320,14 @@ function assignPlayerToMatch(
   if (waitingMatch) {
     const color = openColorForMatch(waitingMatch);
     const playerId = crypto.randomUUID();
-    const player = { playerId, name, socket: null, pieceSkinId };
+    const player = {
+      playerId,
+      name,
+      socket: null,
+      pieceSkinId,
+      joinedAt: Date.now(),
+      hasConnected: false,
+    };
     setColorSlot(waitingMatch, color, player);
     waitingMatch.playersById.set(playerId, color);
     waitingMatch.updatedAt = Date.now();
@@ -332,7 +348,14 @@ function assignPlayerToMatch(
   const matchId = crypto.randomUUID();
   const playerId = crypto.randomUUID();
   const match = createEmptyMatch({ matchId, cooldownMs, gameType });
-  match.players.white = { playerId, name, socket: null, pieceSkinId };
+  match.players.white = {
+    playerId,
+    name,
+    socket: null,
+    pieceSkinId,
+    joinedAt: Date.now(),
+    hasConnected: false,
+  };
   match.playersById.set(playerId, 'w');
   matches.set(matchId, match);
   return {
@@ -345,6 +368,7 @@ function assignPlayerToMatch(
 
 function findJoinableMatch(gameType) {
   let candidate = null;
+  const now = Date.now();
   for (const match of matches.values()) {
     if (isExpired(match)) {
       continue;
@@ -352,7 +376,11 @@ function findJoinableMatch(gameType) {
     if (match.gameType !== gameType) {
       continue;
     }
-    if (!openColorForMatch(match)) {
+    const openColor = openColorForMatch(match);
+    if (!openColor) {
+      continue;
+    }
+    if (!hasNonStaleSearcher(match, openColor, now)) {
       continue;
     }
     if (!candidate || match.createdAt < candidate.createdAt) {
@@ -431,6 +459,20 @@ function handleSocketMessage({ match, color, socket, payload }) {
           reason: 'waiting_for_opponent',
         });
         sendJson(socket, { type: 'error', message: 'Waiting for opponent.' });
+        return;
+      }
+      if (!bothPlayersConnected(match)) {
+        logEvent('move_rejected', {
+          matchId: match.matchId,
+          color,
+          playerId,
+          reason: 'opponent_not_connected',
+        });
+        sendJson(socket, {
+          type: 'error',
+          code: 'waiting_for_opponent',
+          message: 'Waiting for opponent connection.',
+        });
         return;
       }
 
@@ -708,6 +750,14 @@ function handleSocketMessage({ match, color, socket, payload }) {
       return;
     }
     case 'new_game': {
+      if (!bothPlayersConnected(match)) {
+        sendJson(socket, {
+          type: 'error',
+          code: 'waiting_for_opponent',
+          message: 'Waiting for opponent connection.',
+        });
+        return;
+      }
       const requestedCooldown = sanitizeCooldownSeconds(payload.cooldownSeconds);
       if (requestedCooldown != null) {
         match.cooldownMs = requestedCooldown * 1000;
@@ -795,6 +845,16 @@ function handleRelaySocketMessage({ match, color, socket, payload }) {
           type: 'error',
           code: 'waiting_for_opponent',
           message: 'Waiting for opponent.',
+          relayMeta: relayMetaPayload(match),
+          serverNow: Date.now(),
+        });
+        return;
+      }
+      if (!bothPlayersConnected(match)) {
+        sendJson(socket, {
+          type: 'error',
+          code: 'waiting_for_opponent',
+          message: 'Waiting for opponent connection.',
           relayMeta: relayMetaPayload(match),
           serverNow: Date.now(),
         });
@@ -977,6 +1037,16 @@ function handleRelaySocketMessage({ match, color, socket, payload }) {
       return;
     }
     case 'new_game': {
+      if (!bothPlayersConnected(match)) {
+        sendJson(socket, {
+          type: 'error',
+          code: 'waiting_for_opponent',
+          message: 'Waiting for opponent connection.',
+          relayMeta: relayMetaPayload(match),
+          serverNow: Date.now(),
+        });
+        return;
+      }
       const requestedCooldown = sanitizeCooldownSeconds(payload.cooldownSeconds);
       if (requestedCooldown != null) {
         match.cooldownMs = requestedCooldown * 1000;
@@ -1084,6 +1154,7 @@ function createEmptyMatch({ matchId, cooldownMs, gameType }) {
 
 function broadcastState(match, lastMove = null) {
   match.sequence += 1;
+  const connected = bothPlayersConnected(match);
   if (match.gameType === GAME_TYPE_CHESS) {
     const terminal = getTerminalStatus(match.game);
     const payload = {
@@ -1091,7 +1162,7 @@ function broadcastState(match, lastMove = null) {
       sequence: match.sequence,
       matchId: match.matchId,
       gameType: match.gameType,
-      status: !match.players.white || !match.players.black
+      status: !connected
         ? 'waiting'
         : terminal.gameOver
         ? 'game_over'
@@ -1136,7 +1207,7 @@ function broadcastState(match, lastMove = null) {
     sequence: match.sequence,
     matchId: match.matchId,
     gameType: match.gameType,
-    status: !match.players.white || !match.players.black
+    status: !connected
       ? 'waiting'
       : relayResult
       ? 'game_over'
@@ -1220,6 +1291,91 @@ function resetRelaySession(match) {
   match.relayState = null;
   match.relayReady = { w: false, b: false };
   match.relayActionCount = 0;
+}
+
+function isPlayerConnected(player) {
+  return Boolean(
+    player && player.socket && player.socket.readyState === player.socket.OPEN,
+  );
+}
+
+function bothPlayersConnected(match) {
+  return isPlayerConnected(match.players.white) && isPlayerConnected(match.players.black);
+}
+
+function hasNonStaleSearcher(match, openColor, nowMs) {
+  // Only join matches that represent an actively searching opponent.
+  // This prevents pairing with abandoned reservations that never connected.
+  const opponentColor = openColor === 'w' ? 'b' : 'w';
+  const opponent = playerForColor(match, opponentColor);
+  if (!opponent) {
+    return false;
+  }
+  if (isPlayerConnected(opponent)) {
+    return true;
+  }
+  if (opponent.hasConnected === true) {
+    return false;
+  }
+  const joinedAt = Number.isFinite(opponent.joinedAt)
+    ? opponent.joinedAt
+    : match.createdAt;
+  const ageMs = nowMs - joinedAt;
+  return ageMs <= MATCH_CONNECT_GRACE_MS;
+}
+
+function pruneStaleUnconnectedReservations() {
+  const now = Date.now();
+  for (const [matchId, match] of matches.entries()) {
+    let changed = false;
+    for (const color of ['w', 'b']) {
+      const player = playerForColor(match, color);
+      if (!player) {
+        continue;
+      }
+      if (isPlayerConnected(player) || player.hasConnected === true) {
+        continue;
+      }
+      const joinedAt = Number.isFinite(player.joinedAt)
+        ? player.joinedAt
+        : match.createdAt;
+      const ageMs = now - joinedAt;
+      if (ageMs <= MATCH_CONNECT_GRACE_MS) {
+        continue;
+      }
+      // Never-connected players beyond the grace window are treated as stale
+      // reservations and removed so matchmaking can continue.
+      match.playersById.delete(player.playerId);
+      clearColorSlot(match, color);
+      changed = true;
+      logEvent('stale_reservation_pruned', {
+        matchId: match.matchId,
+        color,
+        playerId: player.playerId,
+        ageMs,
+      });
+    }
+
+    if (!changed) {
+      continue;
+    }
+
+    if (match.gameType === GAME_TYPE_CHESS) {
+      match.game = new Chess();
+    } else {
+      resetRelaySession(match);
+    }
+    match.cooldownEndsAt.w = now;
+    match.cooldownEndsAt.b = now;
+    clearForfeitLock(match);
+    match.updatedAt = now;
+
+    if (!match.players.white && !match.players.black) {
+      cleanupMatch(matchId);
+      continue;
+    }
+    broadcastState(match);
+  }
 }
 
 function isRelaySessionReady(match) {

@@ -55,7 +55,12 @@ Env vars:
 - `BIND`
 - `MATCH_TTL_MS` (`>0` enables expiry cleanup)
 - `DEFAULT_COOLDOWN_SECONDS` (default `3`)
+- `MATCH_CONNECT_GRACE_MS` (default `15000`; stale unconnected reservations are pruned)
 - `MAX_SERVER_LOGS` (default `500`)
+
+Match status notes:
+- `waiting`: either seat missing or opponent not currently connected over WebSocket
+- `active`: both players are connected
 
 ## Docker
 
