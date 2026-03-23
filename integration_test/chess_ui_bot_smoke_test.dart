@@ -10,10 +10,6 @@ const bool _runOnline = bool.fromEnvironment(
   'UI_BOT_ONLINE',
   defaultValue: false,
 );
-const String _backendUrl = String.fromEnvironment(
-  'BOT_BACKEND_URL',
-  defaultValue: 'http://localhost:8080',
-);
 const String _displayName = String.fromEnvironment(
   'BOT_NAME',
   defaultValue: 'ChessUiBot',
@@ -104,9 +100,6 @@ Future<void> _enterOnlineModeAndFindMatch(WidgetTester tester) async {
     await tester.pump(const Duration(milliseconds: 250));
   }
 
-  final backendField = find.byKey(
-    const ValueKey<String>('chess_online_backend_url'),
-  );
   final nameField = find.byKey(
     const ValueKey<String>('chess_online_display_name'),
   );
@@ -114,13 +107,8 @@ Future<void> _enterOnlineModeAndFindMatch(WidgetTester tester) async {
     const ValueKey<String>('chess_online_find_match'),
   );
 
-  expect(backendField, findsOneWidget);
   expect(nameField, findsOneWidget);
   expect(findMatchButton, findsOneWidget);
-
-  final backendTextField = tester.widget<TextField>(backendField);
-  backendTextField.controller?.text = _backendUrl;
-  await tester.pump(const Duration(milliseconds: 120));
 
   final nameTextField = tester.widget<TextField>(nameField);
   nameTextField.controller?.text = _displayName;

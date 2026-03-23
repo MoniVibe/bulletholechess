@@ -38,7 +38,6 @@ class _OnlineGamePanelState extends State<OnlineGamePanel>
   };
 
   late final OnlineGameController _controller;
-  late final TextEditingController _apiBaseController;
   late final TextEditingController _nameController;
   late final ScrollController _matchSettingsScrollController;
   late final AnimationController _matchFoundOverlayAnimation;
@@ -60,9 +59,6 @@ class _OnlineGamePanelState extends State<OnlineGamePanel>
   void initState() {
     super.initState();
     _controller = OnlineGameController();
-    _apiBaseController = TextEditingController(
-      text: AppRuntimeConfig.defaultBackendUrl,
-    );
     _nameController = TextEditingController(text: 'Player');
     _matchSettingsScrollController = ScrollController();
     _matchFoundOverlayAnimation = AnimationController(
@@ -93,7 +89,6 @@ class _OnlineGamePanelState extends State<OnlineGamePanel>
     _matchFoundDismissTimer?.cancel();
     _matchFoundOverlayAnimation.dispose();
     _matchSettingsScrollController.dispose();
-    _apiBaseController.dispose();
     _nameController.dispose();
     _controller.dispose();
     super.dispose();
@@ -200,19 +195,6 @@ class _OnlineGamePanelState extends State<OnlineGamePanel>
                       controller: _matchSettingsScrollController,
                       child: Column(
                         children: [
-                          TextField(
-                            key: const ValueKey<String>(
-                              'chess_online_backend_url',
-                            ),
-                            controller: _apiBaseController,
-                            decoration: const InputDecoration(
-                              labelText: 'Backend URL',
-                              hintText: 'https://your-backend.example.com',
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
                           TextField(
                             key: const ValueKey<String>(
                               'chess_online_display_name',
@@ -1256,11 +1238,9 @@ class _OnlineGamePanelState extends State<OnlineGamePanel>
   }
 
   String _resolvedApiBaseUrl() {
-    final trimmed = _apiBaseController.text.trim();
-    if (trimmed.isEmpty) {
-      return AppRuntimeConfig.defaultBackendUrl;
-    }
-    return trimmed;
+    // Keep backend selection non-editable in the UI.
+    // Source of truth remains runtime configuration.
+    return AppRuntimeConfig.defaultBackendUrl;
   }
 }
 

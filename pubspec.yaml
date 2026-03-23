@@ -70,6 +70,9 @@ flutter:
   assets:
     - assets/generated/ui/
     - assets/generated/pieces/
+    # Explicitly include nested Sashite sprites. Flutter directory entries do
+    # not reliably recurse for all build targets/tooling flows.
+    - assets/generated/pieces/sashite/
     - assets/Settings.png
     - assets/Newgame.png
     - assets/rematch.png

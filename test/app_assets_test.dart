@@ -1,7 +1,10 @@
 import 'package:bulletholechess/src/game/ui/app_assets.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('piece sprite mapping covers all FEN piece symbols', () {
     const expectedFenSymbols = <String>{
       'P',
@@ -38,5 +41,20 @@ void main() {
   test('board skins point to bundled assets', () {
     expect(AppAssets.chessBoardClassic, 'assets/generated/ui/board.png');
     expect(AppAssets.chessBoardRed, 'assets/Boardalt.png.png');
+  });
+
+  test('sashite piece assets are present in the runtime asset manifest', () async {
+    final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+    final assets = manifest.listAssets().toSet();
+
+    for (final path in AppAssets.sashitePieceSprites.values) {
+      expect(
+        assets.contains(path),
+        isTrue,
+        reason:
+            'Missing "$path" from AssetManifest; multiplayer piece rendering '
+            'will fail when that skin is selected.',
+      );
+    }
   });
 }
