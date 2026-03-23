@@ -9,6 +9,7 @@ import '../config/app_runtime_config.dart';
 import '../engine/online_game_controller.dart';
 import 'app_assets.dart';
 import 'chess_board_view.dart';
+import 'collapsible_settings_section.dart';
 import 'skin_catalog.dart';
 
 class OnlineGamePanel extends StatefulWidget {
@@ -48,6 +49,7 @@ class _OnlineGamePanelState extends State<OnlineGamePanel>
   bool _connecting = false;
   bool _backendActionInFlight = false;
   bool _isMatchMenuOpen = false;
+  bool _isBoardSettingsOpen = false;
   bool _showMatchFoundOverlay = false;
   bool _wasMatchActive = false;
   int _selectedCooldownSeconds = 3;
@@ -250,75 +252,91 @@ class _OnlineGamePanelState extends State<OnlineGamePanel>
                                   },
                           ),
                           const SizedBox(height: 8),
-                          TimeBarOrientationSwitch(
-                            orientation: _timeBarOrientation,
-                            onChanged: (orientation) {
+                          CollapsibleSettingsSection(
+                            title: 'Board Settings',
+                            isOpen: _isBoardSettingsOpen,
+                            onToggle: () {
                               setState(() {
-                                _timeBarOrientation = orientation;
+                                _isBoardSettingsOpen = !_isBoardSettingsOpen;
                               });
                             },
-                          ),
-                          const SizedBox(height: 8),
-                          DropdownButtonFormField<String>(
-                            key: ValueKey<String>(
-                              'chess_board_skin_$_selectedChessBoardSkinId',
-                            ),
-                            initialValue: _selectedChessBoardSkinId,
-                            decoration: const InputDecoration(
-                              labelText: 'Select Board',
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                            items: _chessBoardDropdownItems(),
-                            onChanged: (value) {
-                              if (value == null) {
-                                return;
-                              }
-                              setState(() {
-                                _selectedChessBoardSkinId = value;
-                              });
-                            },
-                          ),
-                          const SizedBox(height: 8),
-                          DropdownButtonFormField<String>(
-                            key: ValueKey<String>(
-                              'my_piece_skin_$myPieceSkinId',
-                            ),
-                            initialValue: myPieceSkinId,
-                            decoration: const InputDecoration(
-                              labelText: 'Player Skin',
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                            items: SkinCatalog.chessPieceSkins
-                                .map(
-                                  (skin) => DropdownMenuItem<String>(
-                                    value: skin.id,
-                                    enabled: _ownedChessPieceSkinIds.contains(
-                                      skin.id,
-                                    ),
-                                    child: Text(
-                                      _ownedChessPieceSkinIds.contains(skin.id)
-                                          ? skin.label
-                                          : '${skin.label} (Locked)',
-                                    ),
+                            child: Column(
+                              children: [
+                                TimeBarOrientationSwitch(
+                                  orientation: _timeBarOrientation,
+                                  onChanged: (orientation) {
+                                    setState(() {
+                                      _timeBarOrientation = orientation;
+                                    });
+                                  },
+                                ),
+                                const SizedBox(height: 8),
+                                DropdownButtonFormField<String>(
+                                  key: ValueKey<String>(
+                                    'chess_board_skin_$_selectedChessBoardSkinId',
                                   ),
-                                )
-                                .toList(),
-                            onChanged: (value) {
-                              if (value == null) {
-                                return;
-                              }
-                              _controller.setMyPieceSkin(value);
-                            },
-                          ),
-                          const SizedBox(height: 6),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              'Opponent piece skin is server-driven and read-only on your side. If both players pick the same skin, black auto-inverts for clarity.',
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(color: const Color(0xFF6A635A)),
+                                  initialValue: _selectedChessBoardSkinId,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Select Board',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  items: _chessBoardDropdownItems(),
+                                  onChanged: (value) {
+                                    if (value == null) {
+                                      return;
+                                    }
+                                    setState(() {
+                                      _selectedChessBoardSkinId = value;
+                                    });
+                                  },
+                                ),
+                                const SizedBox(height: 8),
+                                DropdownButtonFormField<String>(
+                                  key: ValueKey<String>(
+                                    'my_piece_skin_$myPieceSkinId',
+                                  ),
+                                  initialValue: myPieceSkinId,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Player Skin',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  items: SkinCatalog.chessPieceSkins
+                                      .map(
+                                        (skin) => DropdownMenuItem<String>(
+                                          value: skin.id,
+                                          enabled: _ownedChessPieceSkinIds
+                                              .contains(skin.id),
+                                          child: Text(
+                                            _ownedChessPieceSkinIds.contains(
+                                                  skin.id,
+                                                )
+                                                ? skin.label
+                                                : '${skin.label} (Locked)',
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (value) {
+                                    if (value == null) {
+                                      return;
+                                    }
+                                    _controller.setMyPieceSkin(value);
+                                  },
+                                ),
+                                const SizedBox(height: 6),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    'Opponent piece skin is server-driven and read-only on your side. If both players pick the same skin, black auto-inverts for clarity.',
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: const Color(0xFF6A635A),
+                                        ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                           const SizedBox(height: 8),

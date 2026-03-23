@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../engine/chess_ai_game_controller.dart';
 import 'app_assets.dart';
 import 'chess_board_view.dart';
+import 'collapsible_settings_section.dart';
 import 'skin_catalog.dart';
 
 class ChessAiPanel extends StatefulWidget {
@@ -27,6 +28,7 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
   late final ChessAiGameController _controller;
   late final ScrollController _settingsScrollController;
   bool _menuOpen = true;
+  bool _isBoardSettingsOpen = false;
   String _selectedBoardSkinId = SkinCatalog.defaultChessBoardSkinId;
   String _selectedPlayerPieceSkinId = SkinCatalog.defaultChessPieceSkinId;
   _PlayAsChoice _playAsChoice = _PlayAsChoice.white;
@@ -211,69 +213,83 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                             },
                           ),
                           const SizedBox(height: 8),
-                          TimeBarOrientationSwitch(
-                            orientation: _timeBarOrientation,
-                            onChanged: (orientation) {
+                          CollapsibleSettingsSection(
+                            title: 'Board Settings',
+                            isOpen: _isBoardSettingsOpen,
+                            onToggle: () {
                               setState(() {
-                                _timeBarOrientation = orientation;
+                                _isBoardSettingsOpen = !_isBoardSettingsOpen;
                               });
                             },
-                          ),
-                          const SizedBox(height: 8),
-                          DropdownButtonFormField<String>(
-                            key: ValueKey<String>(
-                              'chess_ai_board_skin_$_selectedBoardSkinId',
-                            ),
-                            initialValue: _selectedBoardSkinId,
-                            decoration: const InputDecoration(
-                              labelText: 'Select Board',
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                            items: _chessBoardDropdownItems(),
-                            onChanged: (value) {
-                              if (value == null) {
-                                return;
-                              }
-                              setState(() {
-                                _selectedBoardSkinId = value;
-                              });
-                            },
-                          ),
-                          const SizedBox(height: 8),
-                          DropdownButtonFormField<String>(
-                            key: ValueKey<String>(
-                              'chess_ai_player_skin_$_selectedPlayerPieceSkinId',
-                            ),
-                            initialValue: _selectedPlayerPieceSkinId,
-                            decoration: const InputDecoration(
-                              labelText: 'Player Skin',
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                            items: SkinCatalog.chessPieceSkins
-                                .map(
-                                  (skin) => DropdownMenuItem<String>(
-                                    value: skin.id,
-                                    enabled: _ownedChessPieceSkinIds.contains(
-                                      skin.id,
-                                    ),
-                                    child: Text(
-                                      _ownedChessPieceSkinIds.contains(skin.id)
-                                          ? skin.label
-                                          : '${skin.label} (Locked)',
-                                    ),
+                            child: Column(
+                              children: [
+                                TimeBarOrientationSwitch(
+                                  orientation: _timeBarOrientation,
+                                  onChanged: (orientation) {
+                                    setState(() {
+                                      _timeBarOrientation = orientation;
+                                    });
+                                  },
+                                ),
+                                const SizedBox(height: 8),
+                                DropdownButtonFormField<String>(
+                                  key: ValueKey<String>(
+                                    'chess_ai_board_skin_$_selectedBoardSkinId',
                                   ),
-                                )
-                                .toList(),
-                            onChanged: (value) {
-                              if (value == null) {
-                                return;
-                              }
-                              setState(() {
-                                _selectedPlayerPieceSkinId = value;
-                              });
-                            },
+                                  initialValue: _selectedBoardSkinId,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Select Board',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  items: _chessBoardDropdownItems(),
+                                  onChanged: (value) {
+                                    if (value == null) {
+                                      return;
+                                    }
+                                    setState(() {
+                                      _selectedBoardSkinId = value;
+                                    });
+                                  },
+                                ),
+                                const SizedBox(height: 8),
+                                DropdownButtonFormField<String>(
+                                  key: ValueKey<String>(
+                                    'chess_ai_player_skin_$_selectedPlayerPieceSkinId',
+                                  ),
+                                  initialValue: _selectedPlayerPieceSkinId,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Player Skin',
+                                    border: OutlineInputBorder(),
+                                    isDense: true,
+                                  ),
+                                  items: SkinCatalog.chessPieceSkins
+                                      .map(
+                                        (skin) => DropdownMenuItem<String>(
+                                          value: skin.id,
+                                          enabled: _ownedChessPieceSkinIds
+                                              .contains(skin.id),
+                                          child: Text(
+                                            _ownedChessPieceSkinIds.contains(
+                                                  skin.id,
+                                                )
+                                                ? skin.label
+                                                : '${skin.label} (Locked)',
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onChanged: (value) {
+                                    if (value == null) {
+                                      return;
+                                    }
+                                    setState(() {
+                                      _selectedPlayerPieceSkinId = value;
+                                    });
+                                  },
+                                ),
+                              ],
+                            ),
                           ),
                           const SizedBox(height: 8),
                           SizedBox(
