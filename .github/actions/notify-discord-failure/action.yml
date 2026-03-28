@@ -15,13 +15,13 @@ inputs:
     required: true
   ref_name:
     description: Branch or tag name.
-    required: true
+    required: false
   actor:
     description: Triggering GitHub actor.
-    required: true
+    required: false
   sha:
     description: Triggering commit SHA.
-    required: true
+    required: false
   server_url:
     description: GitHub server URL.
     required: true
@@ -30,7 +30,7 @@ inputs:
     required: true
   event_name:
     description: Triggering GitHub event.
-    required: true
+    required: false
   failed_jobs_json:
     description: JSON object from toJson(needs) for failed job extraction.
     required: false
@@ -45,17 +45,12 @@ runs:
         WORKFLOW_NAME: ${{ inputs.workflow_name }}
         RUN_NUMBER: ${{ inputs.run_number }}
         REPOSITORY: ${{ inputs.repository }}
-        REF_NAME: ${{ inputs.ref_name }}
-        ACTOR: ${{ inputs.actor }}
-        SHA: ${{ inputs.sha }}
         SERVER_URL: ${{ inputs.server_url }}
         RUN_ID: ${{ inputs.run_id }}
-        EVENT_NAME: ${{ inputs.event_name }}
         FAILED_JOBS_JSON: ${{ inputs.failed_jobs_json }}
       with:
         script: |
           const repoName = (process.env.REPOSITORY.split("/")[1] || process.env.REPOSITORY).trim();
-          const shortSha = process.env.SHA.slice(0, 7);
           const runUrl = `${process.env.SERVER_URL}/${process.env.REPOSITORY}/actions/runs/${process.env.RUN_ID}`;
 
           let failedJobs = [];
@@ -73,11 +68,7 @@ runs:
             : "Unknown";
 
           const content =
-            `repo_name: ${repoName} | CI/CD failure in ${process.env.WORKFLOW_NAME} (#${process.env.RUN_NUMBER})\n` +
-            `Branch: ${process.env.REF_NAME}\n` +
-            `Commit: ${shortSha}\n` +
-            `Actor: ${process.env.ACTOR}\n` +
-            `Event: ${process.env.EVENT_NAME}\n` +
+            `${repoName} | CI/CD failure in ${process.env.WORKFLOW_NAME} (#${process.env.RUN_NUMBER})\n` +
             `Failed jobs: ${failedJobsText}\n` +
             `Run: ${runUrl}`;
 
