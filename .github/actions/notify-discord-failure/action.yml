@@ -72,13 +72,28 @@ runs:
             `Failed jobs: ${failedJobsText}\n` +
             `Run: ${runUrl}`;
 
-          const response = await fetch(process.env.DISCORD_WEBHOOK_URL, {
+          // Ask Discord to return the created message so we can log message id for traceability.
+          const webhookUrl = new URL(process.env.DISCORD_WEBHOOK_URL);
+          webhookUrl.searchParams.set("wait", "true");
+
+          const response = await fetch(webhookUrl.toString(), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ content }),
           });
 
+          const responseBody = await response.text();
           if (!response.ok) {
-            const responseBody = await response.text();
             core.setFailed(`Discord webhook request failed (${response.status}): ${responseBody}`);
+            return;
           }
+
+          let messageId = "unknown";
+          try {
+            const parsed = JSON.parse(responseBody || "{}");
+            if (parsed.id) messageId = parsed.id;
+          } catch {
+            messageId = "unknown";
+          }
+
+          core.info(`Discord webhook accepted message (status ${response.status}, message id ${messageId}).`);
