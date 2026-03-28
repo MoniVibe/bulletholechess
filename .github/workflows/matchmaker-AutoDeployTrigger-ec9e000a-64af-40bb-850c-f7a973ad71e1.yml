@@ -189,6 +189,10 @@ jobs:
         needs.build-and-deploy.result == 'failure'
       }}
     steps:
+      - name: Checkout repository for local action
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Send Discord failure notification
         if: ${{ env.DISCORD_WEBHOOK_URL != '' }}
         uses: ./.github/actions/notify-discord-failure
