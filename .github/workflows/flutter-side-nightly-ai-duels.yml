@@ -69,3 +69,29 @@ jobs:
           else
             echo "No AI duel weird log file produced."
           fi
+
+  notify-discord:
+    name: Notify Discord on failure
+    runs-on: ubuntu-latest
+    needs: [ai-duel-stress]
+    if: >-
+      ${{
+        always() &&
+        secrets.DISCORD_CI_FAILURE_WEBHOOK != '' &&
+        needs.ai-duel-stress.result == 'failure'
+      }}
+    steps:
+      - name: Send Discord failure notification
+        uses: ./.github/actions/notify-discord-failure
+        with:
+          webhook_url: ${{ secrets.DISCORD_CI_FAILURE_WEBHOOK }}
+          workflow_name: ${{ github.workflow }}
+          run_number: ${{ github.run_number }}
+          repository: ${{ github.repository }}
+          ref_name: ${{ github.ref_name }}
+          actor: ${{ github.actor }}
+          sha: ${{ github.sha }}
+          server_url: ${{ github.server_url }}
+          run_id: ${{ github.run_id }}
+          event_name: ${{ github.event_name }}
+          failed_jobs_json: ${{ toJson(needs) }}

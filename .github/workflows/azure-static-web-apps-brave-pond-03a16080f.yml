@@ -99,3 +99,29 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_BRAVE_POND_03A16080F }}
           action: "close"
+
+  notify-discord:
+    name: Notify Discord on failure
+    runs-on: ubuntu-latest
+    needs: [build_and_deploy_job, close_pull_request_job]
+    if: >-
+      ${{
+        always() &&
+        secrets.DISCORD_CI_FAILURE_WEBHOOK != '' &&
+        (needs.build_and_deploy_job.result == 'failure' || needs.close_pull_request_job.result == 'failure')
+      }}
+    steps:
+      - name: Send Discord failure notification
+        uses: ./.github/actions/notify-discord-failure
+        with:
+          webhook_url: ${{ secrets.DISCORD_CI_FAILURE_WEBHOOK }}
+          workflow_name: ${{ github.workflow }}
+          run_number: ${{ github.run_number }}
+          repository: ${{ github.repository }}
+          ref_name: ${{ github.ref_name }}
+          actor: ${{ github.actor }}
+          sha: ${{ github.sha }}
+          server_url: ${{ github.server_url }}
+          run_id: ${{ github.run_id }}
+          event_name: ${{ github.event_name }}
+          failed_jobs_json: ${{ toJson(needs) }}
