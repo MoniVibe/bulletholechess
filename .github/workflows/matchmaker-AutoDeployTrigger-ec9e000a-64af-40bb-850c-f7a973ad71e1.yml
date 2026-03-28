@@ -180,18 +180,20 @@ jobs:
   notify-discord:
     name: Notify Discord on failure
     runs-on: ubuntu-latest
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_CI_FAILURE_WEBHOOK }}
     needs: [build-and-deploy]
     if: >-
       ${{
         always() &&
-        secrets.DISCORD_CI_FAILURE_WEBHOOK != '' &&
         needs.build-and-deploy.result == 'failure'
       }}
     steps:
       - name: Send Discord failure notification
+        if: ${{ env.DISCORD_WEBHOOK_URL != '' }}
         uses: ./.github/actions/notify-discord-failure
         with:
-          webhook_url: ${{ secrets.DISCORD_CI_FAILURE_WEBHOOK }}
+          webhook_url: ${{ env.DISCORD_WEBHOOK_URL }}
           workflow_name: ${{ github.workflow }}
           run_number: ${{ github.run_number }}
           repository: ${{ github.repository }}
