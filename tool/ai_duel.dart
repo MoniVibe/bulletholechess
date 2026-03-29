@@ -236,11 +236,10 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
         break;
       }
 
-      Map<String, String> movePayload = <String, String>{
-        'from': move.from,
-        'to': move.to,
-        'promotion': move.promotion,
-      };
+      final movePayload = <String, String>{'from': move.from, 'to': move.to};
+      if (_looksLikePromotionMove(from: move.from, to: move.to, side: side)) {
+        movePayload['promotion'] = move.promotion;
+      }
       try {
         final legal = ChessRules.findValidatedLegalMove(
           game: game,
@@ -293,7 +292,45 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
         gameWeirdEvents.add(weird);
       }
 
-      final moved = game.move(movePayload);
+      bool moved;
+      try {
+        moved = game.move(movePayload);
+      } catch (error) {
+        final fen = game.fen;
+        final weird = _WeirdEvent(
+          type: 'move_apply_error',
+          gameIndex: gameIndex,
+          seed: config.seed,
+          ply: ply,
+          sideToMove: side,
+          fen: fen,
+          materialSignature: _materialSignatureFromFen(fen),
+          legalMoveCount: _safeLegalMoveCount(game),
+          materialAdvantageAtCap: null,
+          message:
+              'Engine threw while applying move payload '
+              '${jsonEncode(movePayload)}: $error',
+          lastMoves: _tail(playedMoves, 8),
+        );
+        weirdEvents.add(weird);
+        gameWeirdEvents.add(weird);
+        failures.add(
+          _DuelFailure(
+            gameIndex: gameIndex,
+            seed: config.seed,
+            ply: ply,
+            sideToMove: side,
+            fen: fen,
+            message:
+                'Engine threw while applying move '
+                '${move.from}-${move.to}(${move.promotion}): $error',
+            lastMoves: _tail(playedMoves, 8),
+          ),
+        );
+        gameFailed = true;
+        break;
+      }
+
       if (!moved) {
         failures.add(
           _DuelFailure(
@@ -713,6 +750,25 @@ int _safeLegalMoveCount(chess.Chess game) {
   } catch (_) {
     return -1;
   }
+}
+
+bool _looksLikePromotionMove({
+  required String from,
+  required String to,
+  required String side,
+}) {
+  if (from.length != 2 || to.length != 2) {
+    return false;
+  }
+  final fromRank = int.tryParse(from[1]);
+  final toRank = int.tryParse(to[1]);
+  if (fromRank == null || toRank == null) {
+    return false;
+  }
+  if (side == 'w') {
+    return fromRank == 7 && toRank == 8;
+  }
+  return fromRank == 2 && toRank == 1;
 }
 
 String _formatCapAdvForDisplay(int? materialAdvantageAtCap) {
