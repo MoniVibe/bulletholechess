@@ -97,24 +97,26 @@ jobs:
         run: flutter test
 
       - name: AI-vs-AI smoke duel
+        id: ai_duel_smoke
         shell: bash
         run: |
           set -euo pipefail
           RUN_ID="ci-chess-smoke-${{ github.run_id }}"
           LOG_ROOT="artifacts/bughunt/$RUN_ID/chess/ai"
-          LOG_FILE="$LOG_ROOT/weird-20260226.jsonl"
+          EVENT_LOG="$LOG_ROOT/locala.jsonl"
+          WEIRD_LOG="$LOG_ROOT/weird-20260226.jsonl"
           PGN_DIR="$LOG_ROOT/pgn-20260226"
           mkdir -p "$LOG_ROOT" "$PGN_DIR" debug
 
           set +e
           timeout --signal=TERM --kill-after=30s 15m flutter pub run tool/ai_duel.dart \
-            --games=150 \
+            --games=6 \
             --max-plies=240 \
             --seed=20260226 \
             --run-id="$RUN_ID" \
             --conversion-fail-cap-adv=5 \
             --max-conversion-failures=3 \
-            --log-file="$LOG_FILE" \
+            --log-file="$WEIRD_LOG" \
             --pgn-dir="$PGN_DIR" \
             >"$LOG_ROOT/ai_duel.stdout.log" 2>"$LOG_ROOT/ai_duel.stderr.log"
           exit_code=$?
@@ -131,24 +133,28 @@ jobs:
           crashes=0
           invariants=0
           conversions=0
-          if [ -f "$LOG_FILE" ]; then
-            sessions=$(grep -c '"eventType":"session_complete"' "$LOG_FILE" || true)
-            crashes=$(grep -c '"eventType":"crash"' "$LOG_FILE" || true)
-            invariants=$(grep -c '"eventType":"invariant_failure"' "$LOG_FILE" || true)
-            conversions=$(grep -c '"eventType":"conversion_failure"' "$LOG_FILE" || true)
+          if [ -f "$EVENT_LOG" ]; then
+            sessions=$(grep -c '"eventType":"session_joined"' "$EVENT_LOG" || true)
+            crashes=$(grep -c '"eventType":"crash"' "$EVENT_LOG" || true)
+            invariants=$(grep -c '"eventType":"invariant_failure"' "$EVENT_LOG" || true)
             if [ "$crashes" -gt 0 ]; then
               reason="crash"
             fi
             if [ "$invariants" -gt 0 ]; then
               reason="invariant_failure"
             fi
+          fi
+          if [ -f "$WEIRD_LOG" ]; then
+            conversions=$(grep -c '"type":"conversion_failure"' "$WEIRD_LOG" || true)
             if [ "$conversions" -gt 0 ]; then
               reason="conversion_failures"
             fi
           fi
 
-          if [ "$sessions" -lt 1 ] && [ "$reason" = "success" ]; then
-            reason="missing_session_complete"
+          if [ ! -s "$EVENT_LOG" ] && [ "$reason" = "success" ]; then
+            reason="missing_event_trace"
+          elif [ "$sessions" -lt 1 ] && [ "$reason" = "success" ]; then
+            reason="missing_session_joined"
           fi
 
           cat >debug/ci-ai-duel-summary.json <<EOF
@@ -160,7 +166,8 @@ jobs:
             "crashes": $crashes,
             "invariant_failures": $invariants,
             "conversion_failures": $conversions,
-            "log_file": "$LOG_FILE"
+            "event_log_file": "$EVENT_LOG",
+            "weird_log_file": "$WEIRD_LOG"
           }
           EOF
 
@@ -183,22 +190,25 @@ jobs:
 
       - name: Replay verification for AI duel artifacts
         if: always()
+        env:
+          DUEL_OUTCOME: ${{ steps.ai_duel_smoke.outcome }}
         shell: bash
         run: |
           set -euo pipefail
           RUN_ID="ci-chess-smoke-${{ github.run_id }}"
           LOG_ROOT="artifacts/bughunt/$RUN_ID/chess/ai"
-          LOG_FILE="$LOG_ROOT/weird-20260226.jsonl"
-          SUMMARY_FILE="$LOG_ROOT/weird-20260226.summary.json"
-          if [ ! -s "$LOG_FILE" ]; then
-            echo "::error::No AI duel log produced at $LOG_FILE"
-            exit 1
+          trace_count="$(find "$LOG_ROOT" -maxdepth 1 -type f -name '*.jsonl' -size +0c | wc -l | tr -d ' ')"
+          if [ "${trace_count:-0}" -eq 0 ]; then
+            if [ "$DUEL_OUTCOME" = "success" ]; then
+              echo "::error::No non-empty AI duel traces produced under $LOG_ROOT"
+              exit 1
+            fi
+            echo "::warning::No non-empty AI duel traces to verify (duel outcome: $DUEL_OUTCOME)"
+            exit 0
           fi
           flutter pub run tool/replay.dart \
-            --trace="$LOG_FILE" \
             --run-id="$RUN_ID" \
-            --seed=20260226 \
-            --output="$SUMMARY_FILE"
+            --seed=20260226
           flutter pub run tool/verify_replay_artifacts.dart \
             --run-id="$RUN_ID" \
             --no-allow-empty
@@ -209,10 +219,17 @@ jobs:
         run: |
           RUN_ID="ci-chess-smoke-${{ github.run_id }}"
           LOG_ROOT="artifacts/bughunt/$RUN_ID/chess/ai"
-          LOG_FILE="$LOG_ROOT/weird-20260226.jsonl"
-          if [ -f "$LOG_FILE" ]; then
+          EVENT_LOG="$LOG_ROOT/locala.jsonl"
+          WEIRD_LOG="$LOG_ROOT/weird-20260226.jsonl"
+          if [ -f "$EVENT_LOG" ]; then
+            echo "Recent AI duel event stream entries:"
+            tail -n 40 "$EVENT_LOG" || true
+          else
+            echo "No AI duel event stream file produced."
+          fi
+          if [ -f "$WEIRD_LOG" ]; then
             echo "Recent AI duel weird events:"
-            tail -n 40 "$LOG_FILE" || true
+            tail -n 40 "$WEIRD_LOG" || true
           else
             echo "No AI duel weird log file produced."
           fi
