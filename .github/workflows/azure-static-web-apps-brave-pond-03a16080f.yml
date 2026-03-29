@@ -66,6 +66,16 @@ jobs:
           git config --global url."https://x-access-token:${PUREFLUTTER_REPO_TOKEN}@github.com/".insteadOf "https://github.com/"
       - name: Install dependencies
         run: flutter pub get
+      - name: Cleanup tokenized Git auth
+        if: always()
+        shell: bash
+        run: |
+          keys="$(git config --global --name-only --get-regexp '^url\.https://x-access-token:.*@github\.com/\.insteadof$' || true)"
+          if [ -n "$keys" ]; then
+            while IFS= read -r key; do
+              [ -n "$key" ] && git config --global --unset-all "$key" || true
+            done <<< "$keys"
+          fi
       - name: Build Flutter web
         shell: bash
         env:

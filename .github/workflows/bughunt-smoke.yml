@@ -66,6 +66,16 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
+      - name: Cleanup tokenized Git auth
+        if: always()
+        shell: bash
+        run: |
+          keys="$(git config --global --name-only --get-regexp '^url\.https://x-access-token:.*@github\.com/\.insteadof$' || true)"
+          if [ -n "$keys" ]; then
+            while IFS= read -r key; do
+              [ -n "$key" ] && git config --global --unset-all "$key" || true
+            done <<< "$keys"
+          fi
       - name: Run one local bughunt session
         shell: bash
         env:
@@ -94,6 +104,20 @@ jobs:
           ! grep -q '"eventType":"crash"' "$LOG"
           ! grep -q '"eventType":"invariant_failure"' "$LOG"
           ! grep -q 'HOST_CLIENT_DESYNC' "$LOG"
+
+      - name: Emit replay summaries (local smoke)
+        if: always()
+        shell: bash
+        env:
+          RUN_ID: smoke-${{ github.run_id }}-local-${{ matrix.seed }}
+        run: flutter pub run tool/replay.dart --run-id="$RUN_ID"
+
+      - name: Verify replay artifacts (local smoke)
+        if: always()
+        shell: bash
+        env:
+          RUN_ID: smoke-${{ github.run_id }}-local-${{ matrix.seed }}
+        run: flutter pub run tool/verify_replay_artifacts.dart --run-id="$RUN_ID" --no-allow-empty
 
       - name: Upload local smoke artifacts
         if: always()
@@ -156,6 +180,16 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
+      - name: Cleanup tokenized Git auth
+        if: always()
+        shell: bash
+        run: |
+          keys="$(git config --global --name-only --get-regexp '^url\.https://x-access-token:.*@github\.com/\.insteadof$' || true)"
+          if [ -n "$keys" ]; then
+            while IFS= read -r key; do
+              [ -n "$key" ] && git config --global --unset-all "$key" || true
+            done <<< "$keys"
+          fi
       - name: Run host/client online bughunt session
         shell: bash
         env:
@@ -228,6 +262,20 @@ jobs:
           ! grep -q 'HOST_CLIENT_DESYNC' "$HOST_LOG"
           ! grep -q 'HOST_CLIENT_DESYNC' "$CLIENT_LOG"
 
+      - name: Emit replay summaries (online smoke)
+        if: always()
+        shell: bash
+        env:
+          RUN_ID: smoke-${{ github.run_id }}-online-${{ matrix.seed }}
+        run: flutter pub run tool/replay.dart --run-id="$RUN_ID"
+
+      - name: Verify replay artifacts (online smoke)
+        if: always()
+        shell: bash
+        env:
+          RUN_ID: smoke-${{ github.run_id }}-online-${{ matrix.seed }}
+        run: flutter pub run tool/verify_replay_artifacts.dart --run-id="$RUN_ID" --no-allow-empty
+
       - name: Upload online smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -283,6 +331,16 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
+      - name: Cleanup tokenized Git auth
+        if: always()
+        shell: bash
+        run: |
+          keys="$(git config --global --name-only --get-regexp '^url\.https://x-access-token:.*@github\.com/\.insteadof$' || true)"
+          if [ -n "$keys" ]; then
+            while IFS= read -r key; do
+              [ -n "$key" ] && git config --global --unset-all "$key" || true
+            done <<< "$keys"
+          fi
       - name: Install xvfb
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
@@ -345,6 +403,16 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
+      - name: Cleanup tokenized Git auth
+        if: always()
+        shell: bash
+        run: |
+          keys="$(git config --global --name-only --get-regexp '^url\.https://x-access-token:.*@github\.com/\.insteadof$' || true)"
+          if [ -n "$keys" ]; then
+            while IFS= read -r key; do
+              [ -n "$key" ] && git config --global --unset-all "$key" || true
+            done <<< "$keys"
+          fi
       - name: Install xvfb
         run: sudo apt-get update && sudo apt-get install -y xvfb
 

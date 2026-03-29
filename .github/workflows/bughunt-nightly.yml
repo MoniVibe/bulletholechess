@@ -59,6 +59,16 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
+      - name: Cleanup tokenized Git auth
+        if: always()
+        shell: bash
+        run: |
+          keys="$(git config --global --name-only --get-regexp '^url\.https://x-access-token:.*@github\.com/\.insteadof$' || true)"
+          if [ -n "$keys" ]; then
+            while IFS= read -r key; do
+              [ -n "$key" ] && git config --global --unset-all "$key" || true
+            done <<< "$keys"
+          fi
       - name: Run 10-session local soak batch
         shell: bash
         env:
@@ -91,6 +101,20 @@ jobs:
           ! grep -q '"eventType":"crash"' "$LOG"
           ! grep -q '"eventType":"invariant_failure"' "$LOG"
           ! grep -q 'HOST_CLIENT_DESYNC' "$LOG"
+
+      - name: Emit replay summaries (local soak)
+        if: always()
+        shell: bash
+        env:
+          RUN_ID: nightly-${{ github.run_id }}-local-b${{ matrix.batch }}
+        run: flutter pub run tool/replay.dart --run-id="$RUN_ID"
+
+      - name: Verify replay artifacts (local soak)
+        if: always()
+        shell: bash
+        env:
+          RUN_ID: nightly-${{ github.run_id }}-local-b${{ matrix.batch }}
+        run: flutter pub run tool/verify_replay_artifacts.dart --run-id="$RUN_ID" --no-allow-empty
 
       - name: Upload local soak artifacts
         if: always()
@@ -154,6 +178,16 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
+      - name: Cleanup tokenized Git auth
+        if: always()
+        shell: bash
+        run: |
+          keys="$(git config --global --name-only --get-regexp '^url\.https://x-access-token:.*@github\.com/\.insteadof$' || true)"
+          if [ -n "$keys" ]; then
+            while IFS= read -r key; do
+              [ -n "$key" ] && git config --global --unset-all "$key" || true
+            done <<< "$keys"
+          fi
       - name: Run 5-session online soak batch
         shell: bash
         env:
@@ -237,6 +271,20 @@ jobs:
           ! grep -q '"eventType":"invariant_failure"' "$CLIENT_LOG"
           ! grep -q 'HOST_CLIENT_DESYNC' "$HOST_LOG"
           ! grep -q 'HOST_CLIENT_DESYNC' "$CLIENT_LOG"
+
+      - name: Emit replay summaries (online soak)
+        if: always()
+        shell: bash
+        env:
+          RUN_ID: nightly-${{ github.run_id }}-online-b${{ matrix.batch }}
+        run: flutter pub run tool/replay.dart --run-id="$RUN_ID"
+
+      - name: Verify replay artifacts (online soak)
+        if: always()
+        shell: bash
+        env:
+          RUN_ID: nightly-${{ github.run_id }}-online-b${{ matrix.batch }}
+        run: flutter pub run tool/verify_replay_artifacts.dart --run-id="$RUN_ID" --no-allow-empty
 
       - name: Upload online soak artifacts
         if: always()
