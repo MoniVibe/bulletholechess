@@ -56,36 +56,38 @@ class DumbAiEngine {
     var bestScore = -_infinity;
     final topMoves = <Map<String, dynamic>>[];
     for (final move in _orderedMoves(moves)) {
-      final sandbox = game.copy();
-      final moved = sandbox.move(ChessRules.movePayloadFromLegalMove(move));
-      if (!moved) {
+      try {
+        final sandbox = game.copy();
+        final moved = sandbox.move(ChessRules.movePayloadFromLegalMove(move));
+        if (!moved) {
+          continue;
+        }
+
+        var score = _search(
+          game: sandbox,
+          depth: depth - 1,
+          alpha: -_infinity,
+          beta: _infinity,
+          rootColor: rootColor,
+        );
+        score -= _rootLoopPenalty(game, move, ownMoveStats);
+
+        if (score > bestScore) {
+          bestScore = score;
+          topMoves
+            ..clear()
+            ..add(move);
+        } else if (score == bestScore) {
+          topMoves.add(move);
+        }
+      } catch (_) {
+        // Keep search resilient in pathological states surfaced by soak runs.
         continue;
       }
-
-      var score = _search(
-        game: sandbox,
-        depth: depth - 1,
-        alpha: -_infinity,
-        beta: _infinity,
-        rootColor: rootColor,
-      );
-      score -= _rootLoopPenalty(game, move, ownMoveStats);
-
-      if (score > bestScore) {
-        bestScore = score;
-        topMoves
-          ..clear()
-          ..add(move);
-      } else if (score == bestScore) {
-        topMoves.add(move);
-      }
     }
 
-    if (topMoves.isEmpty) {
-      return null;
-    }
-
-    final selected = topMoves[_random.nextInt(topMoves.length)];
+    final pool = topMoves.isEmpty ? moves : topMoves;
+    final selected = pool[_random.nextInt(pool.length)];
     return EngineMove(
       from: selected['from'] as String,
       to: selected['to'] as String,
@@ -198,17 +200,25 @@ class DumbAiEngine {
     final whiteMobility = ChessRules.withTurn(
       game,
       'w',
-      () => game.moves().length,
+      () => _safeMoveCount(game),
     );
     final blackMobility = ChessRules.withTurn(
       game,
       'b',
-      () => game.moves().length,
+      () => _safeMoveCount(game),
     );
     whiteScore += (whiteMobility - blackMobility) * 2;
 
-    final whiteInCheck = ChessRules.withTurn(game, 'w', () => game.in_check);
-    final blackInCheck = ChessRules.withTurn(game, 'b', () => game.in_check);
+    final whiteInCheck = ChessRules.withTurn(
+      game,
+      'w',
+      () => _safeInCheck(game),
+    );
+    final blackInCheck = ChessRules.withTurn(
+      game,
+      'b',
+      () => _safeInCheck(game),
+    );
     if (whiteInCheck) {
       whiteScore -= 24;
     }
@@ -408,6 +418,22 @@ class DumbAiEngine {
       lastFrom: lastFrom,
       lastTo: lastTo,
     );
+  }
+
+  int _safeMoveCount(chess.Chess game) {
+    try {
+      return game.moves().length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  bool _safeInCheck(chess.Chess game) {
+    try {
+      return game.in_check;
+    } catch (_) {
+      return false;
+    }
   }
 }
 
