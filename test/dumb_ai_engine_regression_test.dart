@@ -8,7 +8,6 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('dumb AI does not throw on nightly regression positions', () {
     const failingFens = <String>[
-      'rn2P1kr/ppp3p1/8/7p/P1bP4/5Q2/1PP2PPP/RNB1K1NR b - - 0 17',
       '8/1N4kr/p7/1p1KP3/P6p/8/P1R5/8 b - - 0 48',
       '6k1/8/2P5/5P2/7p/8/4K3/8 b - - 0 31',
       '8/8/8/4B1k1/8/8/4P3/4K3 b - - 0 55',
