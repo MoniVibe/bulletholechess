@@ -9,7 +9,7 @@ Primary mode:
 
 Game-agnostic code lives in the shared repo and is consumed
 from this app via a pinned Git dependency:
-- `https://github.com/meshik/pureflutter.git`
+- `https://github.com/MoniVibe/pureflutter.git`
 - Shared multiplayer transport lifecycle lives there (`MultiplayerTransportClient`).
 - Chess rules/state handling stays in this repo.
 
@@ -300,7 +300,7 @@ This repo uses two GitHub Actions workflows:
 - `MATCHMAKER_AZURE_TENANT_ID`
 - `MATCHMAKER_AZURE_SUBSCRIPTION_ID`
 - `PUREFLUTTER_REPO_TOKEN`
-  - GitHub PAT with read access to `meshik/pureflutter` (needed for `flutter pub get` git dependency in CI).
+  - GitHub PAT with read access to `MoniVibe/pureflutter` (needed for `flutter pub get` git dependency in CI).
 
 ### Optional GitHub repository variables
 
