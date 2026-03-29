@@ -277,7 +277,10 @@ class ChessBoardView extends StatelessWidget {
                                         offset: Offset(
                                           0,
                                           squareSize *
-                                                  pieceYOffset.clamp(-0.4, 0.4) -
+                                                  pieceYOffset.clamp(
+                                                    -0.4,
+                                                    0.4,
+                                                  ) -
                                               _pieceLiftPixels,
                                         ),
                                         child: OverflowBox(
@@ -286,11 +289,13 @@ class ChessBoardView extends StatelessWidget {
                                           minHeight: 0,
                                           maxWidth: pieceSize,
                                           maxHeight:
-                                              pieceSize + _pieceHeightBoostPixels,
+                                              pieceSize +
+                                              _pieceHeightBoostPixels,
                                           child: SizedBox(
                                             width: pieceSize,
                                             height:
-                                                pieceSize + _pieceHeightBoostPixels,
+                                                pieceSize +
+                                                _pieceHeightBoostPixels,
                                             child: _buildPieceSprite(piece),
                                           ),
                                         ),

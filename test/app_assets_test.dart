@@ -43,18 +43,21 @@ void main() {
     expect(AppAssets.chessBoardRed, 'assets/Boardalt.png.png');
   });
 
-  test('sashite piece assets are present in the runtime asset manifest', () async {
-    final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
-    final assets = manifest.listAssets().toSet();
+  test(
+    'sashite piece assets are present in the runtime asset manifest',
+    () async {
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      final assets = manifest.listAssets().toSet();
 
-    for (final path in AppAssets.sashitePieceSprites.values) {
-      expect(
-        assets.contains(path),
-        isTrue,
-        reason:
-            'Missing "$path" from AssetManifest; multiplayer piece rendering '
-            'will fail when that skin is selected.',
-      );
-    }
-  });
+      for (final path in AppAssets.sashitePieceSprites.values) {
+        expect(
+          assets.contains(path),
+          isTrue,
+          reason:
+              'Missing "$path" from AssetManifest; multiplayer piece rendering '
+              'will fail when that skin is selected.',
+        );
+      }
+    },
+  );
 }
