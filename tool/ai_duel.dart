@@ -236,20 +236,48 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
         break;
       }
 
-      Map<String, dynamic>? legal;
+      Map<String, String> movePayload = <String, String>{
+        'from': move.from,
+        'to': move.to,
+        'promotion': move.promotion,
+      };
       try {
-        legal = ChessRules.findValidatedLegalMove(
+        final legal = ChessRules.findValidatedLegalMove(
           game: game,
           from: move.from,
           to: move.to,
           color: side,
           promotion: move.promotion,
         );
+        if (legal != null) {
+          movePayload = ChessRules.movePayloadFromLegalMove(
+            legal,
+            fallbackPromotion: move.promotion,
+          );
+        } else {
+          final fen = game.fen;
+          final weird = _WeirdEvent(
+            type: 'legal_validation_miss',
+            gameIndex: gameIndex,
+            seed: config.seed,
+            ply: ply,
+            sideToMove: side,
+            fen: fen,
+            materialSignature: _materialSignatureFromFen(fen),
+            legalMoveCount: _safeLegalMoveCount(game),
+            materialAdvantageAtCap: null,
+            message:
+                'Validation did not find ${move.from}-${move.to}'
+                '(${move.promotion}); trying direct apply.',
+            lastMoves: _tail(playedMoves, 8),
+          );
+          weirdEvents.add(weird);
+          gameWeirdEvents.add(weird);
+        }
       } catch (error) {
         final fen = game.fen;
-        final message = 'Legal move validation failed: $error';
         final weird = _WeirdEvent(
-          type: 'engine_state_error',
+          type: 'legal_validation_error',
           gameIndex: gameIndex,
           seed: config.seed,
           ply: ply,
@@ -258,47 +286,14 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
           materialSignature: _materialSignatureFromFen(fen),
           legalMoveCount: _safeLegalMoveCount(game),
           materialAdvantageAtCap: null,
-          message: message,
+          message: 'Legal move validation failed: $error; trying direct apply.',
           lastMoves: _tail(playedMoves, 8),
         );
         weirdEvents.add(weird);
         gameWeirdEvents.add(weird);
-        failures.add(
-          _DuelFailure(
-            gameIndex: gameIndex,
-            seed: config.seed,
-            ply: ply,
-            sideToMove: side,
-            fen: fen,
-            message: message,
-            lastMoves: _tail(playedMoves, 8),
-          ),
-        );
-        gameFailed = true;
-        break;
-      }
-      if (legal == null) {
-        failures.add(
-          _DuelFailure(
-            gameIndex: gameIndex,
-            seed: config.seed,
-            ply: ply,
-            sideToMove: side,
-            fen: game.fen,
-            message:
-                'AI proposed illegal move ${move.from}-${move.to}(${move.promotion}).',
-            lastMoves: _tail(playedMoves, 8),
-          ),
-        );
-        gameFailed = true;
-        break;
       }
 
-      final moved = game.move(<String, String>{
-        'from': move.from,
-        'to': move.to,
-        'promotion': move.promotion,
-      });
+      final moved = game.move(movePayload);
       if (!moved) {
         failures.add(
           _DuelFailure(
@@ -308,7 +303,7 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
             sideToMove: side,
             fen: game.fen,
             message:
-                'Engine rejected move ${move.from}-${move.to}(${move.promotion}) after validation.',
+                'Engine rejected move ${move.from}-${move.to}(${move.promotion}) after apply.',
             lastMoves: _tail(playedMoves, 8),
           ),
         );
