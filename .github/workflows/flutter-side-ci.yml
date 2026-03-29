@@ -107,7 +107,7 @@ jobs:
           mkdir -p "$LOG_ROOT" "$PGN_DIR" debug
 
           set +e
-          timeout --signal=TERM 15m flutter pub run tool/ai_duel.dart \
+          timeout --signal=TERM --kill-after=30s 15m flutter pub run tool/ai_duel.dart \
             --games=150 \
             --max-plies=240 \
             --seed=20260226 \
