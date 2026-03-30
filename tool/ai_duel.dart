@@ -302,7 +302,11 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
             legal,
             fallbackPromotion: move.promotion,
           );
-          if (_looksLikePromotionMove(from: move.from, to: move.to, side: side) &&
+          if (_looksLikePromotionMove(
+                from: move.from,
+                to: move.to,
+                side: side,
+              ) &&
               (movePayload['promotion'] == null ||
                   movePayload['promotion']!.isEmpty)) {
             movePayload['promotion'] = move.promotion;
