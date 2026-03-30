@@ -236,7 +236,10 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
         break;
       }
 
-      final movePayload = <String, String>{'from': move.from, 'to': move.to};
+      Map<String, String> movePayload = <String, String>{
+        'from': move.from,
+        'to': move.to,
+      };
       if (_looksLikePromotionMove(from: move.from, to: move.to, side: side)) {
         movePayload['promotion'] = move.promotion;
       }
