@@ -11,7 +11,7 @@ mkdir C:\dev\lab
 cd C:\dev\lab
 git clone git@github.com:meshik/bullethole-chess.git
 git clone git@github.com:meshik/backholegammon.git
-git clone git@github.com:MoniVibe/pureflutter.git
+git clone git@github.com:gammula/pureflutter.git
 ```
 
 Checkout target branch for game repos:
