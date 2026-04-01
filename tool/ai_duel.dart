@@ -140,6 +140,30 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
     var halfmoveAlerted = false;
 
     while (ply < config.maxPlies) {
+      final fenAtTurnStart = game.fen;
+      if (_hasUnpromotedBackRankPawn(fenAtTurnStart)) {
+        final weird = _WeirdEvent(
+          type: 'promotion_state_error',
+          gameIndex: gameIndex,
+          seed: config.seed,
+          ply: ply,
+          sideToMove: ChessRules.colorCode(game.turn),
+          fen: fenAtTurnStart,
+          materialSignature: _materialSignatureFromFen(fenAtTurnStart),
+          legalMoveCount: _safeLegalMoveCount(game),
+          materialAdvantageAtCap: null,
+          message:
+              'Detected pawn on back rank at turn start; treating game as '
+              'draw to avoid crashing the soak run.',
+          lastMoves: _tail(playedMoves, 8),
+        );
+        weirdEvents.add(weird);
+        gameWeirdEvents.add(weird);
+        gameTerminationReason = 'draw_promotion_state_error';
+        gameWinner = null;
+        break;
+      }
+
       final status = _safeEvaluateGameStatus(
         game: game,
         positionSeenCount: positionSeenCount,
@@ -236,20 +260,81 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
         break;
       }
 
-      Map<String, dynamic>? legal;
+      Map<String, String> movePayload = <String, String>{
+        'from': move.from,
+        'to': move.to,
+      };
+      if (_looksLikePromotionMove(from: move.from, to: move.to, side: side)) {
+        movePayload['promotion'] = move.promotion;
+      }
+      final currentSideBeforeApply = ChessRules.colorCode(game.turn);
+      if (currentSideBeforeApply != side) {
+        final fen = game.fen;
+        final weird = _WeirdEvent(
+          type: 'turn_desync',
+          gameIndex: gameIndex,
+          seed: config.seed,
+          ply: ply,
+          sideToMove: currentSideBeforeApply,
+          fen: fen,
+          materialSignature: _materialSignatureFromFen(fen),
+          legalMoveCount: _safeLegalMoveCount(game),
+          materialAdvantageAtCap: null,
+          message:
+              'Turn drift detected before apply; expected $side but saw '
+              '$currentSideBeforeApply. Resyncing turn to $side.',
+          lastMoves: _tail(playedMoves, 8),
+        );
+        weirdEvents.add(weird);
+        gameWeirdEvents.add(weird);
+        game.turn = ChessRules.toChessColor(side);
+      }
       try {
-        legal = ChessRules.findValidatedLegalMove(
+        final legal = ChessRules.findValidatedLegalMove(
           game: game,
           from: move.from,
           to: move.to,
           color: side,
           promotion: move.promotion,
         );
+        if (legal != null) {
+          movePayload = ChessRules.movePayloadFromLegalMove(
+            legal,
+            fallbackPromotion: move.promotion,
+          );
+          if (_looksLikePromotionMove(
+                from: move.from,
+                to: move.to,
+                side: side,
+              ) &&
+              (movePayload['promotion'] == null ||
+                  movePayload['promotion']!.isEmpty)) {
+            movePayload['promotion'] = move.promotion;
+          }
+        } else {
+          final fen = game.fen;
+          final weird = _WeirdEvent(
+            type: 'legal_validation_miss',
+            gameIndex: gameIndex,
+            seed: config.seed,
+            ply: ply,
+            sideToMove: side,
+            fen: fen,
+            materialSignature: _materialSignatureFromFen(fen),
+            legalMoveCount: _safeLegalMoveCount(game),
+            materialAdvantageAtCap: null,
+            message:
+                'Validation did not find ${move.from}-${move.to}'
+                '(${move.promotion}); trying direct apply.',
+            lastMoves: _tail(playedMoves, 8),
+          );
+          weirdEvents.add(weird);
+          gameWeirdEvents.add(weird);
+        }
       } catch (error) {
         final fen = game.fen;
-        final message = 'Legal move validation failed: $error';
         final weird = _WeirdEvent(
-          type: 'engine_state_error',
+          type: 'legal_validation_error',
           gameIndex: gameIndex,
           seed: config.seed,
           ply: ply,
@@ -258,11 +343,44 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
           materialSignature: _materialSignatureFromFen(fen),
           legalMoveCount: _safeLegalMoveCount(game),
           materialAdvantageAtCap: null,
-          message: message,
+          message: 'Legal move validation failed: $error; trying direct apply.',
           lastMoves: _tail(playedMoves, 8),
         );
         weirdEvents.add(weird);
         gameWeirdEvents.add(weird);
+      }
+
+      bool moved;
+      try {
+        moved = game.move(movePayload);
+      } catch (error) {
+        final fen = game.fen;
+        final errorText = '$error';
+        final legalMoveCountAtError = _safeLegalMoveCount(game);
+        final weird = _WeirdEvent(
+          type: 'move_apply_error',
+          gameIndex: gameIndex,
+          seed: config.seed,
+          ply: ply,
+          sideToMove: side,
+          fen: fen,
+          materialSignature: _materialSignatureFromFen(fen),
+          legalMoveCount: legalMoveCountAtError,
+          materialAdvantageAtCap: null,
+          message:
+              'Engine threw while applying move payload '
+              '${jsonEncode(movePayload)}: $error',
+          lastMoves: _tail(playedMoves, 8),
+        );
+        weirdEvents.add(weird);
+        gameWeirdEvents.add(weird);
+        final isEngineStateRangeError =
+            errorText.contains('RangeError') || legalMoveCountAtError == -1;
+        if (isEngineStateRangeError) {
+          gameTerminationReason = 'draw_engine_state_error';
+          gameWinner = null;
+          break;
+        }
         failures.add(
           _DuelFailure(
             gameIndex: gameIndex,
@@ -270,23 +388,9 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
             ply: ply,
             sideToMove: side,
             fen: fen,
-            message: message,
-            lastMoves: _tail(playedMoves, 8),
-          ),
-        );
-        gameFailed = true;
-        break;
-      }
-      if (legal == null) {
-        failures.add(
-          _DuelFailure(
-            gameIndex: gameIndex,
-            seed: config.seed,
-            ply: ply,
-            sideToMove: side,
-            fen: game.fen,
             message:
-                'AI proposed illegal move ${move.from}-${move.to}(${move.promotion}).',
+                'Engine threw while applying move '
+                '${move.from}-${move.to}(${move.promotion}): $error',
             lastMoves: _tail(playedMoves, 8),
           ),
         );
@@ -294,11 +398,6 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
         break;
       }
 
-      final moved = game.move(<String, String>{
-        'from': move.from,
-        'to': move.to,
-        'promotion': move.promotion,
-      });
       if (!moved) {
         failures.add(
           _DuelFailure(
@@ -308,7 +407,7 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
             sideToMove: side,
             fen: game.fen,
             message:
-                'Engine rejected move ${move.from}-${move.to}(${move.promotion}) after validation.',
+                'Engine rejected move ${move.from}-${move.to}(${move.promotion}) after apply.',
             lastMoves: _tail(playedMoves, 8),
           ),
         );
@@ -335,6 +434,28 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
       final fen = game.fen;
       final legalMoveCount = _safeLegalMoveCount(game);
       final materialSignature = _materialSignatureFromFen(fen);
+      if (_hasUnpromotedBackRankPawn(fen)) {
+        final weird = _WeirdEvent(
+          type: 'promotion_state_error',
+          gameIndex: gameIndex,
+          seed: config.seed,
+          ply: ply,
+          sideToMove: ChessRules.colorCode(game.turn),
+          fen: fen,
+          materialSignature: materialSignature,
+          legalMoveCount: legalMoveCount,
+          materialAdvantageAtCap: null,
+          message:
+              'Detected pawn on back rank after move apply; treating game as '
+              'draw to avoid crashing the soak run.',
+          lastMoves: _tail(playedMoves, 8),
+        );
+        weirdEvents.add(weird);
+        gameWeirdEvents.add(weird);
+        gameTerminationReason = 'draw_promotion_state_error';
+        gameWinner = null;
+        break;
+      }
       final positionKey = _normalizedPositionKey(fen);
       final repeatedCount = (positionSeenCount[positionKey] ?? 0) + 1;
       positionSeenCount[positionKey] = repeatedCount;
@@ -718,6 +839,40 @@ int _safeLegalMoveCount(chess.Chess game) {
   } catch (_) {
     return -1;
   }
+}
+
+bool _hasUnpromotedBackRankPawn(String fen) {
+  final board = ChessRules.boardPiecesFromFen(fen);
+  for (final entry in board.entries) {
+    final square = entry.key;
+    final piece = entry.value;
+    if (piece.toLowerCase() != 'p') {
+      continue;
+    }
+    if (square.endsWith('1') || square.endsWith('8')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool _looksLikePromotionMove({
+  required String from,
+  required String to,
+  required String side,
+}) {
+  if (from.length != 2 || to.length != 2) {
+    return false;
+  }
+  final fromRank = int.tryParse(from[1]);
+  final toRank = int.tryParse(to[1]);
+  if (fromRank == null || toRank == null) {
+    return false;
+  }
+  if (side == 'w') {
+    return fromRank == 7 && toRank == 8;
+  }
+  return fromRank == 2 && toRank == 1;
 }
 
 String _formatCapAdvForDisplay(int? materialAdvantageAtCap) {
