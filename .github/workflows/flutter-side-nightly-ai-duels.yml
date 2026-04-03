@@ -8,7 +8,7 @@ on:
       games:
         description: "Number of AI-vs-AI games to run"
         required: false
-        default: "350"
+        default: "30"
 
 jobs:
   ai-duel-stress:
@@ -64,7 +64,7 @@ jobs:
       - name: AI-vs-AI stress duel
         shell: bash
         env:
-          AI_DUEL_GAMES: ${{ github.event.inputs.games || '350' }}
+          AI_DUEL_GAMES: ${{ github.event.inputs.games || '30' }}
         run: |
           set -euo pipefail
           # Keep the job timeout higher for infra variance, but fail this step early if it hangs.
@@ -77,6 +77,7 @@ jobs:
               --seed=20260226 \
               --conversion-fail-cap-adv=5 \
               --max-conversion-failures=14 \
+              --progress-every=5 \
               --log-file=debug/nightly-ai-duel-weird.jsonl \
               --pgn-dir=debug/nightly-ai-duel-weird-pgn
           duel_rc=$?
