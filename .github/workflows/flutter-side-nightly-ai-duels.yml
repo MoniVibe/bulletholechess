@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 7 * * *"
   workflow_dispatch:
+    inputs:
+      games:
+        description: "Number of AI-vs-AI games to run"
+        required: false
+        default: "350"
 
 jobs:
   ai-duel-stress:
@@ -68,13 +73,16 @@ jobs:
 
       - name: AI-vs-AI stress duel
         shell: bash
+        env:
+          AI_DUEL_GAMES: ${{ github.event.inputs.games || '350' }}
         run: |
           set -euo pipefail
           # Keep the job timeout higher for infra variance, but fail this step early if it hangs.
+          echo "Running AI duel with games=${AI_DUEL_GAMES}, maxPlies=260, watchdog=50m."
           set +e
           timeout --signal=TERM --kill-after=60s 50m \
             flutter pub run tool/ai_duel.dart \
-              --games=500 \
+              --games="${AI_DUEL_GAMES}" \
               --max-plies=260 \
               --seed=20260226 \
               --conversion-fail-cap-adv=5 \
