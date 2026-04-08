@@ -17,6 +17,7 @@ const int _defaultRepetitionAlertCount = 3;
 const int _defaultHalfmoveAlertThreshold = 90;
 const int _defaultConversionFailureCapAdvThreshold = 5;
 const int _defaultMaxConversionFailures = -1;
+const int _defaultProgressEvery = 10;
 const String _defaultPgnDirName = 'ai-duel-weird-pgn';
 
 void main(List<String> args) {
@@ -116,6 +117,30 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
   var blackWins = 0;
   var draws = 0;
   var cappedGames = 0;
+  final progressStopwatch = Stopwatch()..start();
+
+  void maybePrintProgress(int gameIndex) {
+    if (config.progressEvery <= 0) {
+      return;
+    }
+    if (gameIndex % config.progressEvery != 0 && gameIndex != config.games) {
+      return;
+    }
+    final elapsed = progressStopwatch.elapsed;
+    final elapsedSeconds = elapsed.inMilliseconds / 1000.0;
+    final gamesPerMinute = elapsedSeconds <= 0
+        ? 0.0
+        : gameIndex / (elapsedSeconds / 60.0);
+    final minutes = elapsed.inMinutes;
+    final seconds = elapsed.inSeconds % 60;
+    print(
+      'Progress: game $gameIndex/${config.games} '
+      'elapsed=${minutes}m${seconds.toString().padLeft(2, '0')}s '
+      'wins(w/b)=$whiteWins/$blackWins draws=$draws capped=$cappedGames '
+      'failures=${failures.length} weird=${weirdEvents.length} '
+      'rate=${gamesPerMinute.toStringAsFixed(2)} games/min',
+    );
+  }
 
   for (var gameIndex = 1; gameIndex <= config.games; gameIndex++) {
     logger?.event(
@@ -542,6 +567,7 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
           resultTag: '*',
         );
       }
+      maybePrintProgress(gameIndex);
       continue;
     }
 
@@ -602,6 +628,7 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
 
     if (wasCapped) {
       _incrementCount(terminationReasonCounts, 'capped');
+      maybePrintProgress(gameIndex);
       continue;
     }
 
@@ -618,6 +645,7 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
         ),
       );
       _incrementCount(terminationReasonCounts, 'failure');
+      maybePrintProgress(gameIndex);
       continue;
     }
 
@@ -629,6 +657,7 @@ _DuelSummary _runDuels(_DuelConfig config, {_BughuntRunLogger? logger}) {
     } else {
       draws += 1;
     }
+    maybePrintProgress(gameIndex);
   }
 
   return _DuelSummary(
@@ -1067,6 +1096,7 @@ class _DuelConfig {
     required this.halfmoveAlertThreshold,
     required this.conversionFailureCapAdvThreshold,
     required this.maxConversionFailures,
+    required this.progressEvery,
     required this.logFilePath,
     required this.pgnDirPath,
     required this.runId,
@@ -1079,6 +1109,7 @@ class _DuelConfig {
   final int halfmoveAlertThreshold;
   final int conversionFailureCapAdvThreshold;
   final int maxConversionFailures;
+  final int progressEvery;
   final String? logFilePath;
   final String? pgnDirPath;
   final String? runId;
@@ -1092,6 +1123,7 @@ class _DuelConfig {
     var conversionFailureCapAdvThreshold =
         _defaultConversionFailureCapAdvThreshold;
     var maxConversionFailures = _defaultMaxConversionFailures;
+    var progressEvery = _defaultProgressEvery;
     String? logFilePath;
     String? pgnDirPath;
     String? runId;
@@ -1133,6 +1165,10 @@ class _DuelConfig {
         );
         continue;
       }
+      if (arg.startsWith('--progress-every=')) {
+        progressEvery = int.parse(arg.substring('--progress-every='.length));
+        continue;
+      }
       if (arg.startsWith('--log-file=')) {
         logFilePath = arg.substring('--log-file='.length);
         continue;
@@ -1169,6 +1205,9 @@ class _DuelConfig {
     if (maxConversionFailures < -1) {
       throw ArgumentError('--max-conversion-failures must be >= -1');
     }
+    if (progressEvery <= 0) {
+      throw ArgumentError('--progress-every must be > 0');
+    }
     if (pgnDirPath != null && pgnDirPath.trim().isEmpty) {
       throw ArgumentError('--pgn-dir must not be empty');
     }
@@ -1185,6 +1224,7 @@ class _DuelConfig {
       halfmoveAlertThreshold: halfmoveAlertThreshold,
       conversionFailureCapAdvThreshold: conversionFailureCapAdvThreshold,
       maxConversionFailures: maxConversionFailures,
+      progressEvery: progressEvery,
       logFilePath: logFilePath,
       pgnDirPath: pgnDirPath,
       runId: runId,
@@ -1366,6 +1406,7 @@ Never _printUsageAndExit() {
     '[--games=N] [--max-plies=N] [--seed=N] '
     '[--repeat-alert=N] [--halfmove-alert=N] '
     '[--conversion-fail-cap-adv=N] [--max-conversion-failures=N] '
+    '[--progress-every=N] '
     '[--log-file=path] [--pgn-dir=path] [--run-id=id]',
   );
   exit(0);

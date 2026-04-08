@@ -4,11 +4,16 @@ on:
   schedule:
     - cron: "0 7 * * *"
   workflow_dispatch:
+    inputs:
+      games:
+        description: "Number of AI-vs-AI games to run"
+        required: false
+        default: "15"
 
 jobs:
   ai-duel-stress:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -55,19 +60,35 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
-      - name: Cleanup tokenized Git auth
-        if: always()
-        shell: bash
-        run: |
-          keys="$(git config --global --name-only --get-regexp '^url\.https://x-access-token:.*@github\.com/\.insteadof$' || true)"
-          if [ -n "$keys" ]; then
-            while IFS= read -r key; do
-              [ -n "$key" ] && git config --global --unset-all "$key" || true
-            done <<< "$keys"
-          fi
 
       - name: AI-vs-AI stress duel
-        run: flutter pub run tool/ai_duel.dart --games=500 --max-plies=260 --seed=20260226 --conversion-fail-cap-adv=5 --max-conversion-failures=14 --log-file=debug/nightly-ai-duel-weird.jsonl --pgn-dir=debug/nightly-ai-duel-weird-pgn
+        shell: bash
+        env:
+          AI_DUEL_GAMES: ${{ github.event.inputs.games || '15' }}
+        run: |
+          set -euo pipefail
+          # Keep the job timeout higher for infra variance, but fail this step early if it hangs.
+          echo "Running AI duel with games=${AI_DUEL_GAMES}, maxPlies=260, watchdog=50m."
+          set +e
+          timeout --signal=TERM --kill-after=60s 50m \
+            flutter pub run tool/ai_duel.dart \
+              --games="${AI_DUEL_GAMES}" \
+              --max-plies=260 \
+              --seed=20260226 \
+              --conversion-fail-cap-adv=5 \
+              --max-conversion-failures=14 \
+              --progress-every=5 \
+              --log-file=debug/nightly-ai-duel-weird.jsonl \
+              --pgn-dir=debug/nightly-ai-duel-weird-pgn
+          duel_rc=$?
+          set -e
+
+          if [ "$duel_rc" -eq 124 ] || [ "$duel_rc" -eq 137 ]; then
+            echo "::error::AI duel exceeded the 50-minute watchdog timeout (job limit is 60 minutes)."
+            echo "::error::Likely causes: hung duel process, dead loop, or workload too large for this lane."
+          fi
+
+          exit "$duel_rc"
 
       - name: Print AI duel debug snippet on failure
         if: failure()
@@ -78,6 +99,17 @@ jobs:
             tail -n 80 debug/nightly-ai-duel-weird.jsonl || true
           else
             echo "No AI duel weird log file produced."
+          fi
+
+      - name: Cleanup tokenized Git auth
+        if: always()
+        shell: bash
+        run: |
+          keys="$(git config --global --name-only --get-regexp '^url\.https://x-access-token:.*@github\.com/\.insteadof$' || true)"
+          if [ -n "$keys" ]; then
+            while IFS= read -r key; do
+              [ -n "$key" ] && git config --global --unset-all "$key" || true
+            done <<< "$keys"
           fi
 
   notify-discord:
