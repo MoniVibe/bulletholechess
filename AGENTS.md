@@ -9,7 +9,7 @@ Maintainability:
 - Be wary of altering existing logic - don't break anything
 
 Reliability:
-- Design any tests you see fit and add them to the CI/CD, only if they are relevant long-term (not prone to change).
+- Design any tests you see fit and add them to the CI/CD, only if they are relevant long-term (not prone to change). CI/CD run time is limited so optimize for short-running scripts.
 
 Scalability:
 - This app is expected to support tens of thousands of concurrent games and interactions
