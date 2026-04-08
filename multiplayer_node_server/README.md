@@ -20,6 +20,22 @@ This service provides:
 
 It runs matchmaking and authoritative move validation in one Node.js process.
 
+## Server Architecture
+
+`server.js` is now the composition root only. It wires dependencies and starts HTTP/WS listeners.
+
+Core modules under `src/`:
+- `constants.js`: environment-driven runtime constants.
+- `logging.js`: bounded in-memory structured logs + debug query filtering.
+- `sanitization.js`: payload and input sanitizers/validators.
+- `chess-logic.js`: chess move validation/application, cooldown, and forfeit-lock primitives.
+- `matchmaking.js`: match create/join assignment, stale reservation pruning, and TTL lifecycle cleanup.
+- `relay-mode.js`: non-chess relay protocol handling (`ready` / `action` / `complete`).
+- `broadcast.js`: state/opponent event fan-out to connected sockets.
+- `routes.js`: HTTP routes (`/healthz`, `/debug/logs`, `/api/matches/create`, `/api/matches/join`).
+- `websocket.js`: connection/session checks and WS message dispatch.
+- `socket-json.js`: JSON send helper used across WS paths.
+
 ## Relay Protocol (Non-Chess gameType)
 
 For `gameType` values other than `chess` (for example `backgammon`), the

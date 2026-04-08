@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import 'chess_rules.dart';
 import 'dumb_ai_engine.dart';
+import 'turn_state_primitives.dart';
 
 /// Local chess game controller for player-vs-AI sessions.
 class ChessAiGameController extends ChangeNotifier {
@@ -17,9 +18,10 @@ class ChessAiGameController extends ChangeNotifier {
   }) : _aiEngine = aiEngine ?? DumbAiEngine(),
        _cooldownDuration = initialCooldownDuration,
        _now = nowProvider ?? DateTime.now {
-    final now = _now().millisecondsSinceEpoch;
-    _whiteReadyAtMs = now;
-    _blackReadyAtMs = now;
+    _cooldowns = TurnCooldownTracker(
+      nowMsProvider: () => _now().millisecondsSinceEpoch,
+    );
+    _cooldowns.resetReadyNow();
     _ticker = Timer.periodic(
       const Duration(milliseconds: 200),
       (_) => _onTick(),
@@ -29,6 +31,10 @@ class ChessAiGameController extends ChangeNotifier {
   final Duration aiMoveDelay;
   final DumbAiEngine _aiEngine;
   final DateTime Function() _now;
+  late final TurnCooldownTracker _cooldowns;
+  final QueuedMoveState _queuedMove = QueuedMoveState(
+    defaultPromotion: ChessRules.defaultPromotion,
+  );
   final chess.Chess _game = chess.Chess();
   final GameSessionLogger _sessionLogger = GameSessionLogger(
     applicationId: 'bulletholechess',
@@ -43,8 +49,6 @@ class ChessAiGameController extends ChangeNotifier {
   bool _hasActiveGame = false;
 
   Duration _cooldownDuration;
-  int _whiteReadyAtMs = 0;
-  int _blackReadyAtMs = 0;
   String _playerColor = 'w';
   String? _selectedSquare;
   Set<String> _legalTargets = <String>{};
@@ -54,9 +58,6 @@ class ChessAiGameController extends ChangeNotifier {
   String? _playerLastMoveTo;
   String? _aiLastMoveFrom;
   String? _aiLastMoveTo;
-  String? _queuedMoveFrom;
-  String? _queuedMoveTo;
-  String _queuedPromotion = ChessRules.defaultPromotion;
 
   String get playerColor => _playerColor;
   String get aiColor => ChessRules.oppositeColor(_playerColor);
@@ -81,15 +82,10 @@ class ChessAiGameController extends ChangeNotifier {
   String? get playerLastMoveTo => _playerLastMoveTo;
   String? get aiLastMoveFrom => _aiLastMoveFrom;
   String? get aiLastMoveTo => _aiLastMoveTo;
-  String? get queuedMoveFrom => _queuedMoveFrom;
-  String? get queuedMoveTo => _queuedMoveTo;
-  bool get hasQueuedMove => _queuedMoveFrom != null && _queuedMoveTo != null;
-  String? get queuedMoveLabel {
-    if (!hasQueuedMove) {
-      return null;
-    }
-    return '$_queuedMoveFrom-$_queuedMoveTo';
-  }
+  String? get queuedMoveFrom => _queuedMove.from;
+  String? get queuedMoveTo => _queuedMove.to;
+  bool get hasQueuedMove => _queuedMove.hasMove;
+  String? get queuedMoveLabel => _queuedMove.label;
 
   Map<String, String> get boardPieces =>
       ChessRules.boardPiecesFromFen(_game.fen);
@@ -99,13 +95,7 @@ class ChessAiGameController extends ChangeNotifier {
     if (!_hasActiveGame || isGameOver) {
       return Duration.zero;
     }
-    final now = _estimatedNowMs();
-    final readyAt = color == 'w' ? _whiteReadyAtMs : _blackReadyAtMs;
-    final remaining = readyAt - now;
-    if (remaining <= 0) {
-      return Duration.zero;
-    }
-    return Duration(milliseconds: remaining);
+    return _cooldowns.remaining(color);
   }
 
   bool get canPlayerInteract {
@@ -194,9 +184,7 @@ class ChessAiGameController extends ChangeNotifier {
     _aiLastMoveFrom = null;
     _aiLastMoveTo = null;
     _clearQueuedMove();
-    final now = _estimatedNowMs();
-    _whiteReadyAtMs = now;
-    _blackReadyAtMs = now;
+    _cooldowns.resetReadyNow();
     _clearSelection();
     _scheduleAiMoveIfNeeded();
     _sessionLogger.logEvent('new_game_started', data: _sessionSnapshot());
@@ -326,7 +314,10 @@ class ChessAiGameController extends ChangeNotifier {
     _playerLastMoveFrom = from;
     _playerLastMoveTo = to;
     _clearQueuedMove();
-    _startCooldown(_playerColor);
+    _cooldowns.startCooldown(
+      color: _playerColor,
+      cooldownDuration: _cooldownDuration,
+    );
     _feedback = null;
     _clearSelection();
 
@@ -433,7 +424,10 @@ class ChessAiGameController extends ChangeNotifier {
 
     _aiLastMoveFrom = aiMove.from;
     _aiLastMoveTo = aiMove.to;
-    _startCooldown(aiColor);
+    _cooldowns.startCooldown(
+      color: aiColor,
+      cooldownDuration: _cooldownDuration,
+    );
     _feedback = null;
     _tryExecuteQueuedMoveIfReady();
     _scheduleAiMoveIfNeeded();
@@ -466,18 +460,6 @@ class ChessAiGameController extends ChangeNotifier {
     notifyListeners();
   }
 
-  int _estimatedNowMs() => _now().millisecondsSinceEpoch;
-
-  void _startCooldown(String color) {
-    final now = _estimatedNowMs();
-    final readyAt = now + _cooldownDuration.inMilliseconds;
-    if (color == 'w') {
-      _whiteReadyAtMs = readyAt;
-    } else {
-      _blackReadyAtMs = readyAt;
-    }
-  }
-
   void _onTick() {
     if (_disposed || !_hasActiveGame) {
       return;
@@ -503,9 +485,9 @@ class ChessAiGameController extends ChangeNotifier {
       return false;
     }
 
-    final from = _queuedMoveFrom!;
-    final to = _queuedMoveTo!;
-    final promotion = _queuedPromotion;
+    final from = _queuedMove.from!;
+    final to = _queuedMove.to!;
+    final promotion = _queuedMove.promotion;
     final validatedMove = ChessRules.findValidatedLegalMove(
       game: _game,
       from: from,
@@ -565,15 +547,11 @@ class ChessAiGameController extends ChangeNotifier {
     required String to,
     required String promotion,
   }) {
-    _queuedMoveFrom = from;
-    _queuedMoveTo = to;
-    _queuedPromotion = promotion;
+    _queuedMove.queue(from: from, to: to, promotion: promotion);
   }
 
   void _clearQueuedMove() {
-    _queuedMoveFrom = null;
-    _queuedMoveTo = null;
-    _queuedPromotion = ChessRules.defaultPromotion;
+    _queuedMove.clear();
   }
 
   void _clearSelection() {

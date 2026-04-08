@@ -1,0 +1,15 @@
+name: Cleanup Tokenized Git Auth
+description: Removes tokenized GitHub URL rewrite rules from global git config.
+runs:
+  using: composite
+  steps:
+    - name: Cleanup tokenized Git auth
+      shell: bash
+      run: |
+        # Remove tokenized url.insteadOf entries to avoid leaking credentials into later steps.
+        keys="$(git config --global --name-only --get-regexp '^url\.https://x-access-token:.*@github\.com/\.insteadof$' || true)"
+        if [ -n "$keys" ]; then
+          while IFS= read -r key; do
+            [ -n "$key" ] && git config --global --unset-all "$key" || true
+          done <<< "$keys"
+        fi

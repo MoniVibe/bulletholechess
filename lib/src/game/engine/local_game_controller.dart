@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import 'chess_rules.dart';
 import 'dumb_ai_engine.dart';
+import 'turn_state_primitives.dart';
 
 class LocalGameController extends ChangeNotifier {
   static const String _defaultPromotion = ChessRules.defaultPromotion;
@@ -22,6 +23,9 @@ class LocalGameController extends ChangeNotifier {
        _aiEngine = aiEngine ?? DumbAiEngine(random: random ?? Random()),
        _cooldownDuration = initialCooldownDuration,
        _now = nowProvider ?? DateTime.now {
+    _cooldowns = TurnCooldownTracker(
+      nowMsProvider: () => _now().millisecondsSinceEpoch,
+    );
     _resetRuntimeState(activateGame: false);
     _ticker = Timer.periodic(
       const Duration(milliseconds: 200),
@@ -35,6 +39,11 @@ class LocalGameController extends ChangeNotifier {
   final Random _random;
   final DumbAiEngine _aiEngine;
   final DateTime Function() _now;
+  late final TurnCooldownTracker _cooldowns;
+  final QueuedMoveState _queuedMove = QueuedMoveState(
+    defaultPromotion: _defaultPromotion,
+  );
+  final ForfeitLockState _forfeitLock = ForfeitLockState();
   final GameSessionLogger _sessionLogger = GameSessionLogger(
     applicationId: 'bulletholechess',
     gameId: 'chess',
@@ -50,8 +59,6 @@ class LocalGameController extends ChangeNotifier {
 
   String _playerColor = 'w';
   int _version = 0;
-  late DateTime _whiteReadyAt;
-  late DateTime _blackReadyAt;
   String? _selectedSquare;
   Set<String> _legalTargets = <String>{};
   String? _playerLastMoveFrom;
@@ -60,11 +67,6 @@ class LocalGameController extends ChangeNotifier {
   String? _opponentLastMoveTo;
   String? _feedback;
   String? _winnerColor;
-  String? _queuedMoveFrom;
-  String? _queuedMoveTo;
-  String _queuedPromotion = _defaultPromotion;
-  String? _forfeitBlockedColor;
-  String? _forfeitReleaseByColor;
 
   int get version => _version;
   Duration get cooldownDuration => _cooldownDuration;
@@ -88,16 +90,10 @@ class LocalGameController extends ChangeNotifier {
       _hasActiveGame &&
       !isGameOver &&
       ChessRules.hasAnyLegalMove(_game, playerColor);
-  bool get hasQueuedMove => _queuedMoveFrom != null && _queuedMoveTo != null;
-  String? get queuedMoveLabel {
-    if (!hasQueuedMove) {
-      return null;
-    }
-    return '$_queuedMoveFrom-$_queuedMoveTo';
-  }
-
-  String? get queuedMoveFrom => _queuedMoveFrom;
-  String? get queuedMoveTo => _queuedMoveTo;
+  bool get hasQueuedMove => _queuedMove.hasMove;
+  String? get queuedMoveLabel => _queuedMove.label;
+  String? get queuedMoveFrom => _queuedMove.from;
+  String? get queuedMoveTo => _queuedMove.to;
 
   String? get selectedSquare => _selectedSquare;
   Set<String> get legalTargets => _legalTargets;
@@ -166,7 +162,7 @@ class LocalGameController extends ChangeNotifier {
     }
 
     if (_isBlockedByForfeitLock(playerColor)) {
-      final releaseBy = _forfeitReleaseByColor;
+      final releaseBy = _forfeitLock.releaseByColor;
       if (releaseBy != null) {
         final releaseRemaining = cooldownRemaining(releaseBy);
         if (releaseRemaining.inMilliseconds > 0) {
@@ -184,13 +180,7 @@ class LocalGameController extends ChangeNotifier {
   }
 
   Duration cooldownRemaining(String color) {
-    final now = _now();
-    final readyAt = color == 'w' ? _whiteReadyAt : _blackReadyAt;
-    final remaining = readyAt.difference(now);
-    if (remaining.isNegative) {
-      return Duration.zero;
-    }
-    return remaining;
+    return _cooldowns.remaining(color);
   }
 
   void startNewGame({bool playerAsWhite = true, Duration? cooldownDuration}) {
@@ -399,15 +389,10 @@ class LocalGameController extends ChangeNotifier {
     _opponentLastMoveTo = null;
     _feedback = null;
     _aiMovePending = false;
-    _queuedMoveFrom = null;
-    _queuedMoveTo = null;
-    _queuedPromotion = _defaultPromotion;
+    _queuedMove.clear();
     _winnerColor = null;
-
-    final now = _now();
-    _whiteReadyAt = now;
-    _blackReadyAt = now;
-    _clearForfeitLock();
+    _cooldowns.resetReadyNow();
+    _forfeitLock.clear();
     _refreshTerminalState();
   }
 
@@ -462,7 +447,10 @@ class LocalGameController extends ChangeNotifier {
       _opponentLastMoveFrom = from;
       _opponentLastMoveTo = to;
     }
-    _setCooldownForMover(moverColor);
+    _cooldowns.startCooldown(
+      color: moverColor,
+      cooldownDuration: _cooldownDuration,
+    );
     _updateForfeitLockAfterMove(
       moverColor: moverColor,
       nominalTurnColor: nominalTurnColor,
@@ -502,16 +490,6 @@ class LocalGameController extends ChangeNotifier {
     return true;
   }
 
-  void _setCooldownForMover(String mover) {
-    final now = _now();
-    if (mover == 'w') {
-      _whiteReadyAt = now.add(_cooldownDuration);
-      return;
-    }
-
-    _blackReadyAt = now.add(_cooldownDuration);
-  }
-
   void _clearSelection() {
     _selectedSquare = null;
     _legalTargets = <String>{};
@@ -522,9 +500,7 @@ class LocalGameController extends ChangeNotifier {
     required String to,
     required String promotion,
   }) {
-    _queuedMoveFrom = from;
-    _queuedMoveTo = to;
-    _queuedPromotion = promotion;
+    _queuedMove.queue(from: from, to: to, promotion: promotion);
     _sessionLogger.logBughuntEvent(
       'action_queued',
       payload: <String, Object?>{
@@ -539,18 +515,13 @@ class LocalGameController extends ChangeNotifier {
   }
 
   void _clearQueuedMove() {
-    final hadQueue = hasQueuedMove;
-    final from = _queuedMoveFrom;
-    final to = _queuedMoveTo;
-    _queuedMoveFrom = null;
-    _queuedMoveTo = null;
-    _queuedPromotion = _defaultPromotion;
-    if (hadQueue) {
+    final previous = _queuedMove.clear();
+    if (previous != null) {
       _sessionLogger.logBughuntEvent(
         'action_cancelled',
         payload: <String, Object?>{
-          'from': from,
-          'to': to,
+          'from': previous.from,
+          'to': previous.to,
           ..._sessionSnapshot(),
         },
         turnIndex: _derivedTurnIndex(),
@@ -571,9 +542,9 @@ class LocalGameController extends ChangeNotifier {
       return;
     }
 
-    final from = _queuedMoveFrom!;
-    final to = _queuedMoveTo!;
-    final promotion = _queuedPromotion;
+    final from = _queuedMove.from!;
+    final to = _queuedMove.to!;
+    final promotion = _queuedMove.promotion;
     final legalMove = ChessRules.findValidatedLegalMove(
       game: _game,
       from: from,
@@ -630,47 +601,22 @@ class LocalGameController extends ChangeNotifier {
     required String moverColor,
     required String nominalTurnColor,
   }) {
-    if (_forfeitBlockedColor == nominalTurnColor &&
-        _forfeitReleaseByColor == moverColor) {
-      _clearForfeitLock();
-      return;
-    }
-    if (moverColor != nominalTurnColor) {
-      _forfeitBlockedColor = nominalTurnColor;
-      _forfeitReleaseByColor = moverColor;
-      return;
-    }
-    if (_forfeitReleaseByColor == moverColor && _forfeitBlockedColor != null) {
-      _clearForfeitLock();
-    }
+    _forfeitLock.updateAfterMove(
+      moverColor: moverColor,
+      nominalTurnColor: nominalTurnColor,
+    );
   }
 
   bool _isBlockedByForfeitLock(String color, {bool resolveTimeout = true}) {
-    if (_forfeitBlockedColor != color) {
-      return false;
-    }
-    if (resolveTimeout) {
-      _resolveForfeitLockTimeoutIfNeeded();
-      if (_forfeitBlockedColor != color) {
-        return false;
-      }
-    }
-    return true;
+    return _forfeitLock.isBlocked(
+      color,
+      resolveTimeout: resolveTimeout,
+      cooldownRemaining: cooldownRemaining,
+    );
   }
 
   void _resolveForfeitLockTimeoutIfNeeded() {
-    final releaseBy = _forfeitReleaseByColor;
-    if (releaseBy == null) {
-      return;
-    }
-    if (cooldownRemaining(releaseBy).inMilliseconds <= 0) {
-      _clearForfeitLock();
-    }
-  }
-
-  void _clearForfeitLock() {
-    _forfeitBlockedColor = null;
-    _forfeitReleaseByColor = null;
+    _forfeitLock.resolveTimeoutIfNeeded(cooldownRemaining: cooldownRemaining);
   }
 
   void _refreshSelectionForCurrentBoard() {

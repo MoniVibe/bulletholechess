@@ -9,6 +9,11 @@ on:
       - ".github/workflows/matchmaker-AutoDeployTrigger-ec9e000a-64af-40bb-850c-f7a973ad71e1.yml"
   workflow_dispatch:
 
+concurrency:
+  # Cancel stale deploy runs for the same ref and keep only the latest attempt.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
