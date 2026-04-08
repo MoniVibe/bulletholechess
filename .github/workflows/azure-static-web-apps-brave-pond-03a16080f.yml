@@ -21,6 +21,11 @@ on:
       - "pubspec.lock"
       - ".github/workflows/azure-static-web-apps-brave-pond-03a16080f.yml"
 
+concurrency:
+  # Cancel stale runs for the same PR/ref to cut redundant build+deploy usage.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build_and_deploy_job:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
@@ -32,50 +37,14 @@ jobs:
           submodules: false
           lfs: false
           persist-credentials: false
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - name: Setup Flutter and shared dependency auth
+        uses: ./.github/actions/setup-flutter-shared-dependency
         with:
-          channel: stable
-      - name: Verify shared dependency pin
-        run: dart tool/verify_shared_dependency.dart
-      - name: Clear checkout GitHub auth header
-        shell: bash
-        run: |
-          git config --local --unset-all http.https://github.com/.extraheader || true
-          git config --global --unset-all http.https://github.com/.extraheader || true
-      - name: Validate access to shared git dependency
-        shell: bash
-        env:
-          PUREFLUTTER_REPO_TOKEN: ${{ secrets.PUREFLUTTER_REPO_TOKEN }}
-        run: |
-          set -euo pipefail
-          if git ls-remote https://github.com/gammula/pureflutter.git HEAD >/dev/null 2>&1; then
-            echo "Anonymous access to gammula/pureflutter is available."
-            exit 0
-          fi
-          if [ -z "${PUREFLUTTER_REPO_TOKEN:-}" ]; then
-            echo "::error::Anonymous git access failed and PUREFLUTTER_REPO_TOKEN is missing."
-            echo "::error::Add PUREFLUTTER_REPO_TOKEN with read access to gammula/pureflutter."
-            exit 1
-          fi
-          if ! git ls-remote "https://x-access-token:${PUREFLUTTER_REPO_TOKEN}@github.com/gammula/pureflutter.git" HEAD >/dev/null 2>&1; then
-            echo "::error::PUREFLUTTER_REPO_TOKEN cannot read gammula/pureflutter."
-            echo "::error::Use a token owned by an account that can open that repo, and ensure org SSO/token approval is completed if required."
-            exit 1
-          fi
-          git config --global url."https://x-access-token:${PUREFLUTTER_REPO_TOKEN}@github.com/".insteadOf "https://github.com/"
-      - name: Install dependencies
-        run: flutter pub get
+          pureflutter_repo_token: ${{ secrets.PUREFLUTTER_REPO_TOKEN }}
+          flutter_cache: "false"
       - name: Cleanup tokenized Git auth
         if: always()
-        shell: bash
-        run: |
-          keys="$(git config --global --name-only --get-regexp '^url\.https://x-access-token:.*@github\.com/\.insteadof$' || true)"
-          if [ -n "$keys" ]; then
-            while IFS= read -r key; do
-              [ -n "$key" ] && git config --global --unset-all "$key" || true
-            done <<< "$keys"
-          fi
+        uses: ./.github/actions/cleanup-tokenized-git-auth
       - name: Build Flutter web
         shell: bash
         env:

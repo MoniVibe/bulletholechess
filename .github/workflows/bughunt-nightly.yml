@@ -5,6 +5,11 @@ on:
     - cron: "20 2 * * *"
   workflow_dispatch:
 
+concurrency:
+  # Avoid overlapping nightly/dispatch runs of the same workflow/ref.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   chess-local-soak:
     runs-on: ubuntu-latest
@@ -13,7 +18,8 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        batch: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        # Combine two historical batches per job to reduce setup overhead.
+        batch: [1, 2, 3, 4, 5]
 
     steps:
       - name: Checkout
@@ -21,55 +27,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - name: Setup Flutter and shared dependency auth
+        uses: ./.github/actions/setup-flutter-shared-dependency
         with:
-          channel: stable
-          cache: false
-      - name: Verify shared dependency pin
-        run: dart tool/verify_shared_dependency.dart
-
-      - name: Clear checkout GitHub auth header
-        shell: bash
-        run: |
-          git config --local --unset-all http.https://github.com/.extraheader || true
-          git config --global --unset-all http.https://github.com/.extraheader || true
-
-      - name: Validate access to shared git dependency
-        shell: bash
-        env:
-          PUREFLUTTER_REPO_TOKEN: ${{ secrets.PUREFLUTTER_REPO_TOKEN }}
-        run: |
-          set -euo pipefail
-          if git ls-remote https://github.com/gammula/pureflutter.git HEAD >/dev/null 2>&1; then
-            echo "Anonymous access to gammula/pureflutter is available."
-            exit 0
-          fi
-          if [ -z "${PUREFLUTTER_REPO_TOKEN:-}" ]; then
-            echo "::error::Anonymous git access failed and PUREFLUTTER_REPO_TOKEN is missing."
-            echo "::error::Add PUREFLUTTER_REPO_TOKEN with read access to gammula/pureflutter."
-            exit 1
-          fi
-          if ! git ls-remote "https://x-access-token:${PUREFLUTTER_REPO_TOKEN}@github.com/gammula/pureflutter.git" HEAD >/dev/null 2>&1; then
-            echo "::error::PUREFLUTTER_REPO_TOKEN cannot read gammula/pureflutter."
-            echo "::error::Use a token owned by an account that can open that repo, and ensure org SSO/token approval is completed if required."
-            exit 1
-          fi
-          git config --global url."https://x-access-token:${PUREFLUTTER_REPO_TOKEN}@github.com/".insteadOf "https://github.com/"
-
-      - name: Install dependencies
-        run: flutter pub get
+          pureflutter_repo_token: ${{ secrets.PUREFLUTTER_REPO_TOKEN }}
+          flutter_cache: "true"
       - name: Cleanup tokenized Git auth
         if: always()
-        shell: bash
-        run: |
-          keys="$(git config --global --name-only --get-regexp '^url\.https://x-access-token:.*@github\.com/\.insteadof$' || true)"
-          if [ -n "$keys" ]; then
-            while IFS= read -r key; do
-              [ -n "$key" ] && git config --global --unset-all "$key" || true
-            done <<< "$keys"
-          fi
-      - name: Run 10-session local soak batch
+        uses: ./.github/actions/cleanup-tokenized-git-auth
+      - name: Run 20-session local soak batch
         shell: bash
         env:
           RUN_ID: nightly-${{ github.run_id }}-local-b${{ matrix.batch }}
@@ -77,15 +43,20 @@ jobs:
           BULLETHOLE_BUGHUNT_RUN_ID: nightly-${{ github.run_id }}-local-b${{ matrix.batch }}
         run: |
           set -euo pipefail
-          for i in $(seq 1 10); do
-            seed=$((3000 + (${{ matrix.batch }} * 100) + i))
-            flutter pub run tool/ai_duel.dart \
-              --games=1 \
-              --max-plies=260 \
-              --seed="$seed" \
-              --run-id="$RUN_ID" \
-              --log-file="artifacts/bughunt/$RUN_ID/chess/ai/weird-$seed.jsonl" \
-              --pgn-dir="artifacts/bughunt/$RUN_ID/chess/ai/pgn-$seed"
+          first_source_batch=$(((${{ matrix.batch }} * 2) - 1))
+          second_source_batch=$((first_source_batch + 1))
+          for source_batch in "$first_source_batch" "$second_source_batch"; do
+            for i in $(seq 1 10); do
+              # Preserve legacy seed sets while reducing runner startup count.
+              seed=$((3000 + (source_batch * 100) + i))
+              flutter pub run tool/ai_duel.dart \
+                --games=1 \
+                --max-plies=260 \
+                --seed="$seed" \
+                --run-id="$RUN_ID" \
+                --log-file="artifacts/bughunt/$RUN_ID/chess/ai/weird-$seed.jsonl" \
+                --pgn-dir="artifacts/bughunt/$RUN_ID/chess/ai/pgn-$seed"
+            done
           done
 
       - name: Gate local soak batch
@@ -97,7 +68,7 @@ jobs:
           LOG="artifacts/bughunt/$RUN_ID/chess/ai/locala.jsonl"
           test -f "$LOG"
           completions=$(grep -c '"eventType":"session_complete"' "$LOG")
-          test "$completions" -ge 10
+          test "$completions" -ge 20
           ! grep -q '"eventType":"crash"' "$LOG"
           ! grep -q '"eventType":"invariant_failure"' "$LOG"
           ! grep -q 'HOST_CLIENT_DESYNC' "$LOG"
@@ -132,7 +103,8 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix:
-        batch: [1, 2, 3, 4, 5, 6]
+        # Combine two historical batches per job to reduce setup overhead.
+        batch: [1, 2, 3]
 
     steps:
       - name: Checkout
@@ -140,55 +112,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - name: Setup Flutter and shared dependency auth
+        uses: ./.github/actions/setup-flutter-shared-dependency
         with:
-          channel: stable
-          cache: false
-      - name: Verify shared dependency pin
-        run: dart tool/verify_shared_dependency.dart
-
-      - name: Clear checkout GitHub auth header
-        shell: bash
-        run: |
-          git config --local --unset-all http.https://github.com/.extraheader || true
-          git config --global --unset-all http.https://github.com/.extraheader || true
-
-      - name: Validate access to shared git dependency
-        shell: bash
-        env:
-          PUREFLUTTER_REPO_TOKEN: ${{ secrets.PUREFLUTTER_REPO_TOKEN }}
-        run: |
-          set -euo pipefail
-          if git ls-remote https://github.com/gammula/pureflutter.git HEAD >/dev/null 2>&1; then
-            echo "Anonymous access to gammula/pureflutter is available."
-            exit 0
-          fi
-          if [ -z "${PUREFLUTTER_REPO_TOKEN:-}" ]; then
-            echo "::error::Anonymous git access failed and PUREFLUTTER_REPO_TOKEN is missing."
-            echo "::error::Add PUREFLUTTER_REPO_TOKEN with read access to gammula/pureflutter."
-            exit 1
-          fi
-          if ! git ls-remote "https://x-access-token:${PUREFLUTTER_REPO_TOKEN}@github.com/gammula/pureflutter.git" HEAD >/dev/null 2>&1; then
-            echo "::error::PUREFLUTTER_REPO_TOKEN cannot read gammula/pureflutter."
-            echo "::error::Use a token owned by an account that can open that repo, and ensure org SSO/token approval is completed if required."
-            exit 1
-          fi
-          git config --global url."https://x-access-token:${PUREFLUTTER_REPO_TOKEN}@github.com/".insteadOf "https://github.com/"
-
-      - name: Install dependencies
-        run: flutter pub get
+          pureflutter_repo_token: ${{ secrets.PUREFLUTTER_REPO_TOKEN }}
+          flutter_cache: "true"
       - name: Cleanup tokenized Git auth
         if: always()
-        shell: bash
-        run: |
-          keys="$(git config --global --name-only --get-regexp '^url\.https://x-access-token:.*@github\.com/\.insteadof$' || true)"
-          if [ -n "$keys" ]; then
-            while IFS= read -r key; do
-              [ -n "$key" ] && git config --global --unset-all "$key" || true
-            done <<< "$keys"
-          fi
-      - name: Run 5-session online soak batch
+        uses: ./.github/actions/cleanup-tokenized-git-auth
+      - name: Run 10-session online soak batch
         shell: bash
         env:
           BACKEND_URL: ${{ vars.BUGHUNT_BACKEND_URL }}
@@ -204,51 +136,56 @@ jobs:
           : > "$HOST_LOG"
           : > "$CLIENT_LOG"
 
-          for i in $(seq 1 5); do
-            seed=$((4000 + (${{ matrix.batch }} * 100) + i))
-            seed_dir="$OUT/seed-$seed"
-            mkdir -p "$seed_dir"
+          first_source_batch=$(((${{ matrix.batch }} * 2) - 1))
+          second_source_batch=$((first_source_batch + 1))
+          for source_batch in "$first_source_batch" "$second_source_batch"; do
+            for i in $(seq 1 5); do
+              # Preserve legacy seed sets while reducing runner startup count.
+              seed=$((4000 + (source_batch * 100) + i))
+              seed_dir="$OUT/seed-$seed"
+              mkdir -p "$seed_dir"
 
-            flutter pub run tool/network_ai_duel_client.dart \
-              --backend-url="$BACKEND_URL" \
-              --name="ChessHost-$seed" \
-              --cooldown-seconds=0 \
-              --seed="$seed" \
-              --role=host \
-              --run-id="$RUN_ID" \
-              --log-file="$seed_dir/host.session.jsonl" \
-              >"$seed_dir/host.stdout.log" 2>"$seed_dir/host.stderr.log" &
-            host_pid=$!
+              flutter pub run tool/network_ai_duel_client.dart \
+                --backend-url="$BACKEND_URL" \
+                --name="ChessHost-$seed" \
+                --cooldown-seconds=0 \
+                --seed="$seed" \
+                --role=host \
+                --run-id="$RUN_ID" \
+                --log-file="$seed_dir/host.session.jsonl" \
+                >"$seed_dir/host.stdout.log" 2>"$seed_dir/host.stderr.log" &
+              host_pid=$!
 
-            ready=0
-            for _ in $(seq 1 120); do
-              if [ -f "$seed_dir/host.session.jsonl" ] && grep -q '"eventType":"session_joined"' "$seed_dir/host.session.jsonl"; then
-                ready=1
-                break
+              ready=0
+              for _ in $(seq 1 120); do
+                if [ -f "$seed_dir/host.session.jsonl" ] && grep -q '"eventType":"session_joined"' "$seed_dir/host.session.jsonl"; then
+                  ready=1
+                  break
+                fi
+                sleep 0.5
+              done
+              if [ "$ready" -ne 1 ]; then
+                kill "$host_pid" || true
+                exit 1
               fi
-              sleep 0.5
+
+              flutter pub run tool/network_ai_duel_client.dart \
+                --backend-url="$BACKEND_URL" \
+                --name="ChessClient-$seed" \
+                --cooldown-seconds=0 \
+                --seed="$seed" \
+                --role=client \
+                --run-id="$RUN_ID" \
+                --log-file="$seed_dir/client.session.jsonl" \
+                >"$seed_dir/client.stdout.log" 2>"$seed_dir/client.stderr.log" &
+              client_pid=$!
+
+              wait "$host_pid"
+              wait "$client_pid"
+
+              cat "$seed_dir/host.session.jsonl" >> "$HOST_LOG"
+              cat "$seed_dir/client.session.jsonl" >> "$CLIENT_LOG"
             done
-            if [ "$ready" -ne 1 ]; then
-              kill "$host_pid" || true
-              exit 1
-            fi
-
-            flutter pub run tool/network_ai_duel_client.dart \
-              --backend-url="$BACKEND_URL" \
-              --name="ChessClient-$seed" \
-              --cooldown-seconds=0 \
-              --seed="$seed" \
-              --role=client \
-              --run-id="$RUN_ID" \
-              --log-file="$seed_dir/client.session.jsonl" \
-              >"$seed_dir/client.stdout.log" 2>"$seed_dir/client.stderr.log" &
-            client_pid=$!
-
-            wait "$host_pid"
-            wait "$client_pid"
-
-            cat "$seed_dir/host.session.jsonl" >> "$HOST_LOG"
-            cat "$seed_dir/client.session.jsonl" >> "$CLIENT_LOG"
           done
 
       - name: Gate online soak batch
@@ -263,8 +200,8 @@ jobs:
           test -f "$CLIENT_LOG"
           host_completions=$(grep -c '"eventType":"session_complete"' "$HOST_LOG")
           client_completions=$(grep -c '"eventType":"session_complete"' "$CLIENT_LOG")
-          test "$host_completions" -ge 5
-          test "$client_completions" -ge 5
+          test "$host_completions" -ge 10
+          test "$client_completions" -ge 10
           ! grep -q '"eventType":"crash"' "$HOST_LOG"
           ! grep -q '"eventType":"crash"' "$CLIENT_LOG"
           ! grep -q '"eventType":"invariant_failure"' "$HOST_LOG"
