@@ -58,6 +58,7 @@ class ChessAiGameController extends ChangeNotifier {
   String? _playerLastMoveTo;
   String? _aiLastMoveFrom;
   String? _aiLastMoveTo;
+  final List<String> _moveHistory = <String>[];
 
   String get playerColor => _playerColor;
   String get aiColor => ChessRules.oppositeColor(_playerColor);
@@ -89,7 +90,7 @@ class ChessAiGameController extends ChangeNotifier {
 
   Map<String, String> get boardPieces =>
       ChessRules.boardPiecesFromFen(_game.fen);
-  List<String> get history => _game.getHistory().cast<String>();
+  List<String> get history => List<String>.unmodifiable(_moveHistory);
 
   Duration cooldownRemaining(String color) {
     if (!_hasActiveGame || isGameOver) {
@@ -183,6 +184,7 @@ class ChessAiGameController extends ChangeNotifier {
     _playerLastMoveTo = null;
     _aiLastMoveFrom = null;
     _aiLastMoveTo = null;
+    _moveHistory.clear();
     _clearQueuedMove();
     _cooldowns.resetReadyNow();
     _clearSelection();
@@ -290,6 +292,12 @@ class ChessAiGameController extends ChangeNotifier {
       return;
     }
 
+    if (piece != null && ChessRules.pieceColor(piece) != _playerColor) {
+      _feedback = 'Move blocked: destination is occupied by opponent.';
+      notifyListeners();
+      return;
+    }
+
     _feedback = 'That move is not legal.';
     notifyListeners();
   }
@@ -364,7 +372,7 @@ class ChessAiGameController extends ChangeNotifier {
       return;
     }
     // Keep opening behavior familiar: white starts when no move was made yet.
-    if (_game.getHistory().isEmpty && turnColor != aiColor) {
+    if (_moveHistory.isEmpty && turnColor != aiColor) {
       return;
     }
     if (!ChessRules.hasAnyLegalMove(_game, aiColor)) {
@@ -530,16 +538,48 @@ class ChessAiGameController extends ChangeNotifier {
     required String to,
     required String promotion,
   }) {
-    final moved = ChessRules.withTurn<bool>(
-      _game,
-      color,
-      () => _game.move(<String, String>{
-        'from': from,
-        'to': to,
-        'promotion': promotion,
-      }),
+    final legalMove = ChessRules.findValidatedLegalMove(
+      game: _game,
+      from: from,
+      to: to,
+      color: color,
+      promotion: promotion,
     );
-    return moved;
+    if (legalMove == null) {
+      return false;
+    }
+
+    final previousFen = _game.fen;
+    final payload = ChessRules.movePayloadFromLegalMove(
+      legalMove,
+      fallbackPromotion: promotion,
+    );
+    final moved = ChessRules.applyValidatedLegalMoveForColor(
+      game: _game,
+      legalMove: legalMove,
+      color: color,
+      promotion: payload['promotion'] ?? promotion,
+    );
+    if (!moved) {
+      return false;
+    }
+
+    final movedPiece = _game.get(to);
+    final movedPieceColor = movedPiece == null
+        ? null
+        : ChessRules.colorCode(movedPiece.color);
+    if (movedPieceColor != color) {
+      // Safety invariant: after a legal move, destination must hold mover piece.
+      _game.load(previousFen);
+      return false;
+    }
+    final san = legalMove['san'];
+    if (san is String && san.isNotEmpty) {
+      _moveHistory.add(san);
+    } else {
+      _moveHistory.add('$from$to');
+    }
+    return true;
   }
 
   void _queueMove({
@@ -576,7 +616,7 @@ class ChessAiGameController extends ChangeNotifier {
     super.dispose();
   }
 
-  int _derivedActionIndex() => _game.getHistory().length;
+  int _derivedActionIndex() => _moveHistory.length;
 
   int _derivedTurnIndex() => (_derivedActionIndex() ~/ 2) + 1;
 

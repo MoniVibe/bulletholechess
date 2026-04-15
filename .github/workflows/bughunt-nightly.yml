@@ -2,24 +2,35 @@ name: Bughunt Nightly
 
 on:
   schedule:
+    # Daily canary lane with tiny workload to preserve fast bug signal at low cost.
     - cron: "20 2 * * *"
   workflow_dispatch:
+    inputs:
+      run_profile:
+        description: "Execution depth (canary keeps spend low; deep is explicit/manual)"
+        required: false
+        default: canary
+        type: choice
+        options:
+          - canary
+          - deep
 
 concurrency:
   # Avoid overlapping nightly/dispatch runs of the same workflow/ref.
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  # Replace stale runs so overlaps do not multiply minute usage.
+  cancel-in-progress: true
 
 jobs:
   chess-local-soak:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 4
     strategy:
       fail-fast: false
       max-parallel: 2
       matrix:
-        # Combine two historical batches per job to reduce setup overhead.
-        batch: [1, 2, 3, 4, 5]
+        # Deep mode is opt-in via manual dispatch. Scheduled runs stay lightweight.
+        batch: ${{ fromJson(github.event_name == 'schedule' && '[1]' || (github.event.inputs.run_profile == 'deep' && '[1,2,3,4,5]' || '[1,2]')) }}
 
     steps:
       - name: Checkout
@@ -35,20 +46,28 @@ jobs:
       - name: Cleanup tokenized Git auth
         if: always()
         uses: ./.github/actions/cleanup-tokenized-git-auth
-      - name: Run 20-session local soak batch
+      - name: Run local soak batch
         shell: bash
         env:
           RUN_ID: nightly-${{ github.run_id }}-local-b${{ matrix.batch }}
           BULLETHOLE_LOG_ROOT: ${{ github.workspace }}
           BULLETHOLE_BUGHUNT_RUN_ID: nightly-${{ github.run_id }}-local-b${{ matrix.batch }}
+          LOCAL_SEEDS_PER_SOURCE_BATCH: ${{ github.event_name == 'schedule' && '1' || (github.event.inputs.run_profile == 'deep' && '5' || '2') }}
+          LOCAL_SOURCE_BATCH_COUNT: ${{ github.event_name == 'schedule' && '1' || '2' }}
+          LOCAL_DUEL_TIMEOUT: ${{ github.event_name == 'schedule' && '90s' || '4m' }}
         run: |
           set -euo pipefail
           first_source_batch=$(((${{ matrix.batch }} * 2) - 1))
           second_source_batch=$((first_source_batch + 1))
-          for source_batch in "$first_source_batch" "$second_source_batch"; do
-            for i in $(seq 1 10); do
+          source_batches=("$first_source_batch")
+          if [ "$LOCAL_SOURCE_BATCH_COUNT" -gt 1 ]; then
+            source_batches+=("$second_source_batch")
+          fi
+          for source_batch in "${source_batches[@]}"; do
+            for i in $(seq 1 "$LOCAL_SEEDS_PER_SOURCE_BATCH"); do
               # Preserve legacy seed sets while reducing runner startup count.
               seed=$((3000 + (source_batch * 100) + i))
+              timeout --signal=TERM --kill-after=20s "$LOCAL_DUEL_TIMEOUT" \
               flutter pub run tool/ai_duel.dart \
                 --games=1 \
                 --max-plies=260 \
@@ -63,12 +82,15 @@ jobs:
         shell: bash
         env:
           RUN_ID: nightly-${{ github.run_id }}-local-b${{ matrix.batch }}
+          LOCAL_SEEDS_PER_SOURCE_BATCH: ${{ github.event_name == 'schedule' && '1' || (github.event.inputs.run_profile == 'deep' && '5' || '2') }}
+          LOCAL_SOURCE_BATCH_COUNT: ${{ github.event_name == 'schedule' && '1' || '2' }}
         run: |
           set -euo pipefail
           LOG="artifacts/bughunt/$RUN_ID/chess/ai/locala.jsonl"
           test -f "$LOG"
           completions=$(grep -c '"eventType":"session_complete"' "$LOG")
-          test "$completions" -ge 20
+          expected=$((LOCAL_SOURCE_BATCH_COUNT * LOCAL_SEEDS_PER_SOURCE_BATCH))
+          test "$completions" -ge "$expected"
           ! grep -q '"eventType":"crash"' "$LOG"
           ! grep -q '"eventType":"invariant_failure"' "$LOG"
           ! grep -q 'HOST_CLIENT_DESYNC' "$LOG"
@@ -98,13 +120,13 @@ jobs:
   chess-online-soak:
     if: ${{ vars.BUGHUNT_BACKEND_URL != '' }}
     runs-on: self-hosted
-    timeout-minutes: 140
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       max-parallel: 1
       matrix:
-        # Combine two historical batches per job to reduce setup overhead.
-        batch: [1, 2, 3]
+        # Deep mode is opt-in via manual dispatch. Scheduled runs stay lightweight.
+        batch: ${{ fromJson(github.event_name == 'schedule' && '[1]' || (github.event.inputs.run_profile == 'deep' && '[1,2,3]' || '[1,2]')) }}
 
     steps:
       - name: Checkout
@@ -120,13 +142,14 @@ jobs:
       - name: Cleanup tokenized Git auth
         if: always()
         uses: ./.github/actions/cleanup-tokenized-git-auth
-      - name: Run 10-session online soak batch
+      - name: Run online soak batch
         shell: bash
         env:
           BACKEND_URL: ${{ vars.BUGHUNT_BACKEND_URL }}
           RUN_ID: nightly-${{ github.run_id }}-online-b${{ matrix.batch }}
           BULLETHOLE_LOG_ROOT: ${{ github.workspace }}
           BULLETHOLE_BUGHUNT_RUN_ID: nightly-${{ github.run_id }}-online-b${{ matrix.batch }}
+          ONLINE_SEEDS_PER_SOURCE_BATCH: ${{ github.event_name == 'schedule' && '1' || (github.event.inputs.run_profile == 'deep' && '5' || '2') }}
         run: |
           set -euo pipefail
           OUT="artifacts/bughunt/$RUN_ID/chess/online"
@@ -139,12 +162,13 @@ jobs:
           first_source_batch=$(((${{ matrix.batch }} * 2) - 1))
           second_source_batch=$((first_source_batch + 1))
           for source_batch in "$first_source_batch" "$second_source_batch"; do
-            for i in $(seq 1 5); do
+            for i in $(seq 1 "$ONLINE_SEEDS_PER_SOURCE_BATCH"); do
               # Preserve legacy seed sets while reducing runner startup count.
               seed=$((4000 + (source_batch * 100) + i))
               seed_dir="$OUT/seed-$seed"
               mkdir -p "$seed_dir"
 
+              timeout --signal=TERM --kill-after=20s 6m \
               flutter pub run tool/network_ai_duel_client.dart \
                 --backend-url="$BACKEND_URL" \
                 --name="ChessHost-$seed" \
@@ -169,6 +193,7 @@ jobs:
                 exit 1
               fi
 
+              timeout --signal=TERM --kill-after=20s 6m \
               flutter pub run tool/network_ai_duel_client.dart \
                 --backend-url="$BACKEND_URL" \
                 --name="ChessClient-$seed" \
@@ -192,6 +217,7 @@ jobs:
         shell: bash
         env:
           RUN_ID: nightly-${{ github.run_id }}-online-b${{ matrix.batch }}
+          ONLINE_SEEDS_PER_SOURCE_BATCH: ${{ github.event_name == 'schedule' && '1' || (github.event.inputs.run_profile == 'deep' && '5' || '2') }}
         run: |
           set -euo pipefail
           HOST_LOG="artifacts/bughunt/$RUN_ID/chess/online/host.jsonl"
@@ -200,8 +226,9 @@ jobs:
           test -f "$CLIENT_LOG"
           host_completions=$(grep -c '"eventType":"session_complete"' "$HOST_LOG")
           client_completions=$(grep -c '"eventType":"session_complete"' "$CLIENT_LOG")
-          test "$host_completions" -ge 10
-          test "$client_completions" -ge 10
+          expected=$((2 * ONLINE_SEEDS_PER_SOURCE_BATCH))
+          test "$host_completions" -ge "$expected"
+          test "$client_completions" -ge "$expected"
           ! grep -q '"eventType":"crash"' "$HOST_LOG"
           ! grep -q '"eventType":"crash"' "$CLIENT_LOG"
           ! grep -q '"eventType":"invariant_failure"' "$HOST_LOG"

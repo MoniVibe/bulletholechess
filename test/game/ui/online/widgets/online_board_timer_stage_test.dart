@@ -176,4 +176,67 @@ void main() {
     expect(find.text('Request New Game'), findsOneWidget);
     expect(find.text('Match Found!'), findsNothing);
   });
+
+  testWidgets('vertical timer layout does not overflow on fractional widths', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 411.43,
+            height: 731.57,
+            child: OnlineBoardTimerStage(
+              pieces: const <String, String>{},
+              playerColor: 'w',
+              boardAssetPath: 'assets/images/chess/chess_board_classic.png',
+              playableInsetRatio: AppAssets.chessBoardPlayableInsetRatio,
+              playableSizeRatio: AppAssets.chessBoardPlayableSizeRatio,
+              whitePieceSprites: const <String, String>{},
+              blackPieceSprites: const <String, String>{},
+              whitePieceScale: 1,
+              blackPieceScale: 1,
+              whitePieceYOffset: 0,
+              blackPieceYOffset: 0,
+              invertBlackPieceColors: false,
+              selectedSquare: null,
+              legalTargets: const <String>{},
+              playerLastMoveFrom: null,
+              playerLastMoveTo: null,
+              opponentLastMoveFrom: null,
+              opponentLastMoveTo: null,
+              queuedMoveFrom: null,
+              queuedMoveTo: null,
+              checkedKingSquares: const <String>{},
+              isOnlineCheckmate: false,
+              boardMessage: null,
+              onSquareTap: (_) {},
+              isConnected: true,
+              isWaitingForOpponent: false,
+              isMatchActive: true,
+              isGameOver: false,
+              canStart: true,
+              onFindMatch: () {},
+              showMatchFoundOverlay: false,
+              matchFoundOverlay: const SizedBox.shrink(),
+              victoryOverlay: const SizedBox.shrink(),
+              timeBarOrientation: TimeBarOrientation.vertical,
+              topColor: 'b',
+              bottomColor: 'w',
+              topRemaining: const Duration(milliseconds: 1500),
+              bottomRemaining: Duration.zero,
+              cooldownDuration: const Duration(seconds: 3),
+              timerHasStarted: true,
+              topIsActiveWindow: true,
+              bottomIsActiveWindow: false,
+              topIsPlayer: false,
+              bottomIsPlayer: true,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+  });
 }

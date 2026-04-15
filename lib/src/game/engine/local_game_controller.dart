@@ -67,6 +67,7 @@ class LocalGameController extends ChangeNotifier {
   String? _opponentLastMoveTo;
   String? _feedback;
   String? _winnerColor;
+  final List<String> _moveHistory = <String>[];
 
   int get version => _version;
   Duration get cooldownDuration => _cooldownDuration;
@@ -109,7 +110,7 @@ class LocalGameController extends ChangeNotifier {
   }
 
   String? get feedback => _feedback;
-  List<String> get history => _game.getHistory().cast<String>();
+  List<String> get history => List<String>.unmodifiable(_moveHistory);
   Map<String, String> get boardPieces =>
       ChessRules.boardPiecesFromFen(_game.fen);
   Set<String> get checkedKingSquares {
@@ -304,6 +305,12 @@ class LocalGameController extends ChangeNotifier {
       return;
     }
 
+    if (piece != null && ChessRules.pieceColor(piece) != playerColor) {
+      _feedback = 'Move blocked: destination is occupied by opponent.';
+      notifyListeners();
+      return;
+    }
+
     _feedback = 'Illegal move';
     notifyListeners();
   }
@@ -391,6 +398,7 @@ class LocalGameController extends ChangeNotifier {
     _aiMovePending = false;
     _queuedMove.clear();
     _winnerColor = null;
+    _moveHistory.clear();
     _cooldowns.resetReadyNow();
     _forfeitLock.clear();
     _refreshTerminalState();
@@ -421,17 +429,37 @@ class LocalGameController extends ChangeNotifier {
       return false;
     }
 
-    final previousTurn = _game.turn;
-    _game.turn = ChessRules.toChessColor(moverColor);
+    final previousFen = _game.fen;
     final payload = ChessRules.movePayloadFromLegalMove(
       legalMove,
       fallbackPromotion: promotion,
     );
-    final moved = _game.move(payload);
+    final moved = ChessRules.applyValidatedLegalMoveForColor(
+      game: _game,
+      legalMove: legalMove,
+      color: moverColor,
+      promotion: payload['promotion'] ?? promotion,
+    );
 
     if (!moved) {
-      _game.turn = previousTurn;
       return false;
+    }
+
+    final movedPiece = _game.get(to);
+    final movedPieceColor = movedPiece == null
+        ? null
+        : ChessRules.colorCode(movedPiece.color);
+    if (movedPieceColor != moverColor) {
+      // Safety invariant: a confirmed move must leave the mover's piece on the
+      // destination square. Revert if state was corrupted by edge-case timing.
+      _game.load(previousFen);
+      return false;
+    }
+    final san = legalMove['san'];
+    if (san is String && san.isNotEmpty) {
+      _moveHistory.add(san);
+    } else {
+      _moveHistory.add('$from$to');
     }
 
     if (_aiMovePending && moverColor == playerColor) {
@@ -667,7 +695,7 @@ class LocalGameController extends ChangeNotifier {
     return Duration(milliseconds: minMs + delta);
   }
 
-  int _derivedActionIndex() => _game.getHistory().length;
+  int _derivedActionIndex() => _moveHistory.length;
 
   int _derivedTurnIndex() => (_derivedActionIndex() ~/ 2) + 1;
 
@@ -680,7 +708,7 @@ class LocalGameController extends ChangeNotifier {
       'hasActiveGame': _hasActiveGame,
       'isGameOver': isGameOver,
       'winnerColor': _winnerColor,
-      'historyLen': _game.getHistory().length,
+      'historyLen': _moveHistory.length,
       'fen': _game.fen,
       'cooldownSeconds': _cooldownDuration.inSeconds,
       'whiteRemainingMs': cooldownRemaining('w').inMilliseconds,

@@ -108,4 +108,44 @@ void main() {
 
     expect(squares, <String>{'e1'});
   });
+
+  test(
+    'legal king move list preserves castling when evaluating opposite turn with en-passant marker',
+    () {
+      final game = chess.Chess();
+      final loaded = game.load('r3k2r/8/8/8/8/8/8/R3K2R b KQkq e3 0 1');
+      expect(loaded, isTrue);
+
+      final kingTargets = ChessRules.legalDestinationsFrom(
+        game: game,
+        square: 'e1',
+        color: 'w',
+      );
+
+      expect(kingTargets.contains('g1'), isTrue);
+      expect(kingTargets.contains('c1'), isTrue);
+    },
+  );
+
+  test(
+    'legal move generation tolerates inconsistent turn/en-passant state without throwing',
+    () {
+      final game = chess.Chess();
+      final loaded = game.load('r3k2r/8/8/8/8/8/8/R3K2R b KQkq e3 0 1');
+      expect(loaded, isTrue);
+
+      // Simulate a transient engine state where turn and en-passant marker are
+      // inconsistent, which previously could throw during cloned FEN loads.
+      game.turn = chess.Color.WHITE;
+
+      expect(
+        () => ChessRules.legalDestinationsFrom(
+          game: game,
+          square: 'e1',
+          color: 'w',
+        ),
+        returnsNormally,
+      );
+    },
+  );
 }

@@ -104,6 +104,14 @@ class OnlineBoardTimerStage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    double snapDownToPixel(double value) {
+      final ratio = MediaQuery.devicePixelRatioOf(context);
+      if (ratio <= 0) {
+        return value;
+      }
+      return (value * ratio).floorToDouble() / ratio;
+    }
+
     final topActiveColor = topColor == 'w'
         ? const Color(0xFF42A5F5)
         : const Color(0xFFFF7043);
@@ -222,16 +230,19 @@ class OnlineBoardTimerStage extends StatelessWidget {
           }
 
           if (timeBarOrientation == TimeBarOrientation.vertical) {
-            final boardSize = math.min(
+            final rawBoardSize = math.min(
               constraints.maxHeight,
               constraints.maxWidth - (verticalBarWidth * 2) - (edgeGap * 2),
             );
+            final boardSize = snapDownToPixel(rawBoardSize);
             if (boardSize <= 0) {
               return const SizedBox.shrink();
             }
 
             return SizedBox(
-              width: boardSize + (verticalBarWidth * 2) + (edgeGap * 2),
+              width: snapDownToPixel(
+                boardSize + (verticalBarWidth * 2) + (edgeGap * 2),
+              ),
               height: boardSize,
               child: Row(
                 children: [
@@ -301,17 +312,20 @@ class OnlineBoardTimerStage extends StatelessWidget {
             );
           }
 
-          final boardSize = math.min(
+          final rawBoardSize = math.min(
             constraints.maxWidth,
             constraints.maxHeight - (horizontalBarHeight * 2) - (edgeGap * 2),
           );
+          final boardSize = snapDownToPixel(rawBoardSize);
           if (boardSize <= 0) {
             return const SizedBox.shrink();
           }
 
           return SizedBox(
             width: boardSize,
-            height: boardSize + (horizontalBarHeight * 2) + (edgeGap * 2),
+            height: snapDownToPixel(
+              boardSize + (horizontalBarHeight * 2) + (edgeGap * 2),
+            ),
             child: Column(
               children: [
                 if (showTimeBars)

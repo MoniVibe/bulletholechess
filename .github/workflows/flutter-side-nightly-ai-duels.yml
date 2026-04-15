@@ -2,23 +2,33 @@ name: Flutter Side Nightly AI Duels
 
 on:
   schedule:
+    # Daily canary lane with tiny workload to preserve fast bug signal at low cost.
     - cron: "0 7 * * *"
   workflow_dispatch:
     inputs:
+      run_profile:
+        description: "Execution depth (canary keeps spend low; deep is explicit/manual)"
+        required: false
+        default: canary
+        type: choice
+        options:
+          - canary
+          - deep
       games:
         description: "Number of AI-vs-AI games to run"
         required: false
-        default: "15"
+        default: "6"
 
 concurrency:
   # Prevent overlap between scheduled and manual nightly duel runs.
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  # Keep minute usage bounded by replacing stale runs for the same ref.
+  cancel-in-progress: true
 
 jobs:
   ai-duel-stress:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 4
 
     steps:
       - name: Checkout
@@ -35,13 +45,30 @@ jobs:
       - name: AI-vs-AI stress duel
         shell: bash
         env:
-          AI_DUEL_GAMES: ${{ github.event.inputs.games || '15' }}
+          # Scheduled runs are always lightweight.
+          AI_DUEL_GAMES: ${{ github.event_name == 'schedule' && '1' || (github.event.inputs.games || '4') }}
+          IS_DEEP_PROFILE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.run_profile == 'deep' }}
         run: |
           set -euo pipefail
+          if ! [[ "$AI_DUEL_GAMES" =~ ^[0-9]+$ ]]; then
+            echo "::error::AI_DUEL_GAMES must be a positive integer. Received: $AI_DUEL_GAMES"
+            exit 1
+          fi
+          watchdog_minutes=3
+          max_games=2
+          if [ "$IS_DEEP_PROFILE" = "true" ]; then
+            # With a strict 4-minute hosted budget, deep profile is advisory only.
+            echo "::warning::run_profile=deep requested, but this lane is hard-capped to canary limits (4-minute budget)."
+          fi
+          # Keep runs bounded even if a very large value is entered.
+          if [ "$AI_DUEL_GAMES" -gt "$max_games" ]; then
+            echo "::warning::Capping AI_DUEL_GAMES from $AI_DUEL_GAMES to $max_games to protect CI minutes."
+            AI_DUEL_GAMES="$max_games"
+          fi
           # Keep the job timeout higher for infra variance, but fail this step early if it hangs.
-          echo "Running AI duel with games=${AI_DUEL_GAMES}, maxPlies=260, watchdog=50m."
+          echo "Running AI duel with games=${AI_DUEL_GAMES}, maxPlies=260, watchdog=${watchdog_minutes}m, deep_profile=${IS_DEEP_PROFILE}."
           set +e
-          timeout --signal=TERM --kill-after=60s 50m \
+          timeout --signal=TERM --kill-after=30s "${watchdog_minutes}m" \
             flutter pub run tool/ai_duel.dart \
               --games="${AI_DUEL_GAMES}" \
               --max-plies=260 \
@@ -55,7 +82,7 @@ jobs:
           set -e
 
           if [ "$duel_rc" -eq 124 ] || [ "$duel_rc" -eq 137 ]; then
-            echo "::error::AI duel exceeded the 50-minute watchdog timeout (job limit is 60 minutes)."
+            echo "::error::AI duel exceeded the ${watchdog_minutes}-minute watchdog timeout (job limit is 4 minutes)."
             echo "::error::Likely causes: hung duel process, dead loop, or workload too large for this lane."
           fi
 
