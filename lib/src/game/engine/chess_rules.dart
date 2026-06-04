@@ -55,11 +55,19 @@ class ChessRules {
   }
 
   static bool hasAnyLegalMove(chess.Chess game, String color) {
-    return withTurn(game, color, () => game.moves().isNotEmpty);
+    final gameForColor = _cloneForColor(game: game, color: color);
+    if (gameForColor == null) {
+      return false;
+    }
+    return gameForColor.moves().isNotEmpty;
   }
 
   static bool isInCheckFor(chess.Chess game, String color) {
-    return withTurn(game, color, () => game.in_check);
+    final gameForColor = _cloneForColor(game: game, color: color);
+    if (gameForColor == null) {
+      return false;
+    }
+    return gameForColor.in_check;
   }
 
   static Map<String, dynamic>? findValidatedLegalMove({
@@ -97,6 +105,37 @@ class ChessRules {
     // When callers pass a stale/unsupported promotion choice, still return a
     // legal option so upstream code can recover with a valid payload.
     return legalMoves.first;
+  }
+
+  static bool applyValidatedLegalMoveForColor({
+    required chess.Chess game,
+    required Map<String, dynamic> legalMove,
+    required String color,
+    required String promotion,
+  }) {
+    final gameForColor = _cloneForColor(game: game, color: color);
+    if (gameForColor == null) {
+      return false;
+    }
+
+    final payload = movePayloadFromLegalMove(
+      legalMove,
+      fallbackPromotion: promotion,
+    );
+    final moved = gameForColor.move(payload);
+    if (!moved) {
+      return false;
+    }
+
+    try {
+      final loaded = game.load(gameForColor.fen);
+      if (!loaded) {
+        return false;
+      }
+    } catch (_) {
+      return false;
+    }
+    return true;
   }
 
   static String? detectCheckmateWinner(chess.Chess game) {
@@ -201,14 +240,14 @@ class ChessRules {
     required chess.Chess game,
     required String color,
   }) {
-    return withTurn(
-      game,
-      color,
-      () => game
-          .moves(<String, dynamic>{'verbose': true})
-          .map((dynamic item) => Map<String, dynamic>.from(item as Map))
-          .toList(),
-    );
+    final gameForColor = _cloneForColor(game: game, color: color);
+    if (gameForColor == null) {
+      return const <Map<String, dynamic>>[];
+    }
+    return gameForColor
+        .moves(<String, dynamic>{'verbose': true})
+        .map((dynamic item) => Map<String, dynamic>.from(item as Map))
+        .toList();
   }
 
   static bool _isValidSquare(String square) {
@@ -231,5 +270,92 @@ class ChessRules {
       return true;
     }
     return false;
+  }
+
+  static chess.Chess? _cloneForColor({
+    required chess.Chess game,
+    required String color,
+  }) {
+    final fen = _safeFen(game);
+    if (fen == null) {
+      return null;
+    }
+    final fenParts = fen.split(' ');
+    if (fenParts.length < 6) {
+      return null;
+    }
+
+    final normalizedColor = color.trim().toLowerCase() == 'w' ? 'w' : 'b';
+    final originalTurn = fenParts[1];
+    fenParts[1] = normalizedColor;
+    fenParts[3] = _sanitizeEnPassantTarget(
+      target: fenParts[3],
+      turnColor: normalizedColor,
+    );
+
+    // When forcing a different turn, stale en-passant targets can produce
+    // illegal move-generation artifacts in some chess positions.
+    if (originalTurn != normalizedColor) {
+      fenParts[3] = '-';
+    }
+
+    final clonedGame = chess.Chess();
+    if (_tryLoadFen(clonedGame, fenParts.join(' '))) {
+      return clonedGame;
+    }
+
+    // Fallback: clear en-passant square when FEN validation rejects it.
+    fenParts[3] = '-';
+    if (_tryLoadFen(clonedGame, fenParts.join(' '))) {
+      return clonedGame;
+    }
+
+    return null;
+  }
+
+  static String? _safeFen(chess.Chess game) {
+    try {
+      return game.fen;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static bool _tryLoadFen(chess.Chess game, String fen) {
+    try {
+      return game.load(fen);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static String _sanitizeEnPassantTarget({
+    required String target,
+    required String turnColor,
+  }) {
+    final normalizedTarget = target.trim().toLowerCase();
+    if (normalizedTarget == '-') {
+      return '-';
+    }
+    if (normalizedTarget.length != 2) {
+      return '-';
+    }
+
+    final file = normalizedTarget[0];
+    if (!_files.contains(file)) {
+      return '-';
+    }
+
+    final rank = int.tryParse(normalizedTarget[1]);
+    if (rank == null) {
+      return '-';
+    }
+
+    final expectedRank = turnColor == 'w' ? 6 : 3;
+    if (rank != expectedRank) {
+      return '-';
+    }
+
+    return normalizedTarget;
   }
 }

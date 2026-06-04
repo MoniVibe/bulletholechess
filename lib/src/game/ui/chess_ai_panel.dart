@@ -36,6 +36,14 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
   TimeBarOrientation _timeBarOrientation = TimeBarOrientation.horizontal;
   final math.Random _uiRandom = math.Random();
 
+  double _snapDownToPixel(double value, BuildContext context) {
+    final ratio = MediaQuery.devicePixelRatioOf(context);
+    if (ratio <= 0) {
+      return value;
+    }
+    return (value * ratio).floorToDouble() / ratio;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -398,21 +406,25 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                       }
 
                       if (_timeBarOrientation == TimeBarOrientation.vertical) {
-                        final boardSize = math.min(
+                        final rawBoardSize = math.min(
                           constraints.maxHeight,
                           constraints.maxWidth -
                               (verticalBarWidth * 2) -
                               (edgeGap * 2),
+                        );
+                        final boardSize = _snapDownToPixel(
+                          rawBoardSize,
+                          context,
                         );
                         if (boardSize <= 0) {
                           return const SizedBox.shrink();
                         }
 
                         return SizedBox(
-                          width:
-                              boardSize +
-                              (verticalBarWidth * 2) +
-                              (edgeGap * 2),
+                          width: _snapDownToPixel(
+                            boardSize + (verticalBarWidth * 2) + (edgeGap * 2),
+                            context,
+                          ),
                           height: boardSize,
                           child: Row(
                             children: [
@@ -488,22 +500,23 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                         );
                       }
 
-                      final boardSize = math.min(
+                      final rawBoardSize = math.min(
                         constraints.maxWidth,
                         constraints.maxHeight -
                             (horizontalBarHeight * 2) -
                             (edgeGap * 2),
                       );
+                      final boardSize = _snapDownToPixel(rawBoardSize, context);
                       if (boardSize <= 0) {
                         return const SizedBox.shrink();
                       }
 
                       return SizedBox(
                         width: boardSize,
-                        height:
-                            boardSize +
-                            (horizontalBarHeight * 2) +
-                            (edgeGap * 2),
+                        height: _snapDownToPixel(
+                          boardSize + (horizontalBarHeight * 2) + (edgeGap * 2),
+                          context,
+                        ),
                         child: Column(
                           children: [
                             if (hasActiveGame)

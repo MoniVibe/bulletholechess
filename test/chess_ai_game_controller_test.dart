@@ -62,6 +62,69 @@ void main() {
     expect(controller.cooldownRemaining('w').inMilliseconds, greaterThan(0));
   });
 
+  test('player move advances nominal turn color', () {
+    final controller = ChessAiGameController(
+      aiMoveDelay: const Duration(days: 1),
+      initialCooldownDuration: Duration.zero,
+      aiEngine: _NoopAiEngine(),
+    );
+    addTearDown(controller.dispose);
+
+    controller.startNewGame(
+      playerAsWhite: true,
+      cooldownDuration: Duration.zero,
+    );
+
+    controller.tapSquare('e2');
+    controller.tapSquare('e4');
+
+    expect(controller.turnColor, 'b');
+  });
+
+  test('player pawn keeps ownership after e2-e4', () {
+    final controller = ChessAiGameController(
+      aiMoveDelay: const Duration(days: 1),
+      initialCooldownDuration: Duration.zero,
+      aiEngine: _NoopAiEngine(),
+    );
+    addTearDown(controller.dispose);
+
+    controller.startNewGame(
+      playerAsWhite: true,
+      cooldownDuration: Duration.zero,
+    );
+
+    controller.tapSquare('e2');
+    controller.tapSquare('e4');
+
+    expect(controller.boardPieces['e4'], 'P');
+    expect(controller.boardPieces.containsKey('e2'), isFalse);
+  });
+
+  test('consecutive same-color pawn pushes preserve ownership', () {
+    final controller = ChessAiGameController(
+      aiMoveDelay: const Duration(days: 1),
+      initialCooldownDuration: Duration.zero,
+      aiEngine: _NoopAiEngine(),
+    );
+    addTearDown(controller.dispose);
+
+    controller.startNewGame(
+      playerAsWhite: true,
+      cooldownDuration: Duration.zero,
+    );
+
+    controller.tapSquare('e2');
+    controller.tapSquare('e4');
+    controller.tapSquare('d2');
+    controller.tapSquare('d4');
+
+    expect(controller.boardPieces['e4'], 'P');
+    expect(controller.boardPieces['d4'], 'P');
+    expect(controller.boardPieces.containsKey('e2'), isFalse);
+    expect(controller.boardPieces.containsKey('d2'), isFalse);
+  });
+
   test(
     'can queue a move while AI is thinking and auto-executes when legal',
     () async {
@@ -132,4 +195,9 @@ class _DeterministicAiEngine extends DumbAiEngine {
   EngineMove? chooseMove(chess.Chess game) {
     return const EngineMove(from: 'e7', to: 'e5');
   }
+}
+
+class _NoopAiEngine extends DumbAiEngine {
+  @override
+  EngineMove? chooseMove(chess.Chess game) => null;
 }
