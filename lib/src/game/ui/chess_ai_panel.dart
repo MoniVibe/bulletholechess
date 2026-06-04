@@ -304,14 +304,7 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                             width: double.infinity,
                             child: FilledButton.icon(
                               key: const ValueKey<String>('chess_ai_new_game'),
-                              onPressed: () {
-                                _controller.startNewGame(
-                                  playerAsWhite: _resolvePlayerAsWhite(),
-                                  cooldownDuration: Duration(
-                                    seconds: _selectedCooldownSeconds,
-                                  ),
-                                );
-                              },
+                              onPressed: _startNewGame,
                               icon: const AppAssetIcon(
                                 AppAssets.newGameIcon,
                                 fallbackIcon: Icons.refresh,
@@ -377,27 +370,13 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                                     title: _victoryTitle(),
                                     subtitle: _victorySubtitle(),
                                     actionLabel: 'New Game',
-                                    onAction: () {
-                                      _controller.startNewGame(
-                                        playerAsWhite: _resolvePlayerAsWhite(),
-                                        cooldownDuration: Duration(
-                                          seconds: _selectedCooldownSeconds,
-                                        ),
-                                      );
-                                    },
+                                    onAction: _startNewGame,
                                   ),
                                 )
                               else if (!hasActiveGame)
                                 Positioned.fill(
                                   child: _buildStartOverlay(
-                                    onStart: () {
-                                      _controller.startNewGame(
-                                        playerAsWhite: _resolvePlayerAsWhite(),
-                                        cooldownDuration: Duration(
-                                          seconds: _selectedCooldownSeconds,
-                                        ),
-                                      );
-                                    },
+                                    onStart: _startNewGame,
                                   ),
                                 ),
                             ],
@@ -610,58 +589,62 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                   ),
                 ),
               ),
-              const SizedBox(height: 10),
-              Card(
-                color: Theme.of(
-                  context,
-                ).colorScheme.error.withValues(alpha: 0.16),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Note:',
-                        style: TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _controller.feedback ?? '-',
-                          style: TextStyle(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onSurface.withValues(alpha: 0.88),
+              if (_controller.feedback != null) ...[
+                const SizedBox(height: 10),
+                Card(
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.error.withValues(alpha: 0.16),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Note:',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _controller.feedback!,
+                            style: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurface.withValues(alpha: 0.88),
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Log:',
-                        style: TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          tailHistory.isEmpty ? '-' : tailHistory.join('  '),
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
+              ],
+              if (tailHistory.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Log:',
+                          style: TextStyle(fontWeight: FontWeight.w700),
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            tailHistory.join('  '),
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
+              ],
             ],
           ),
         );
@@ -699,6 +682,18 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
       return 'Checkmate. $winner takes the game.';
     }
     return _controller.statusText;
+  }
+
+  void _startNewGame() {
+    _controller.startNewGame(
+      playerAsWhite: _resolvePlayerAsWhite(),
+      cooldownDuration: Duration(seconds: _selectedCooldownSeconds),
+    );
+    if (_menuOpen) {
+      setState(() {
+        _menuOpen = false;
+      });
+    }
   }
 
   bool _resolvePlayerAsWhite() {
