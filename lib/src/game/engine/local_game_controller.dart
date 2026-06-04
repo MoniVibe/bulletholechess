@@ -111,6 +111,7 @@ class LocalGameController extends ChangeNotifier {
 
   String? get feedback => _feedback;
   List<String> get history => List<String>.unmodifiable(_moveHistory);
+  String exportDebugLog() => _sessionLogger.exportLatestSessionJsonl();
   Map<String, String> get boardPieces =>
       ChessRules.boardPiecesFromFen(_game.fen);
   Set<String> get checkedKingSquares {

@@ -92,6 +92,8 @@ class ChessAiGameController extends ChangeNotifier {
       ChessRules.boardPiecesFromFen(_game.fen);
   List<String> get history => List<String>.unmodifiable(_moveHistory);
 
+  String exportDebugLog() => _sessionLogger.exportLatestSessionJsonl();
+
   Duration cooldownRemaining(String color) {
     if (!_hasActiveGame || isGameOver) {
       return Duration.zero;

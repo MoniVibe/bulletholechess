@@ -320,6 +320,8 @@ class OnlineGameController extends ChangeNotifier {
     notifyListeners();
   }
 
+  String exportDebugLog() => _sessionLogger.exportLatestSessionJsonl();
+
   String buildDebugReport({int maxEntries = 250}) {
     final header = <String>[
       'Bullethole Chess Debug Report',

@@ -42,6 +42,7 @@ class OnlineMatchmakingSettingsCard extends StatelessWidget {
     required this.hasQueuedMove,
     required this.queuedMoveLabel,
     required this.onClearQueuedMove,
+    this.debugLogExportButton,
     super.key,
   });
 
@@ -84,9 +85,25 @@ class OnlineMatchmakingSettingsCard extends StatelessWidget {
   final bool hasQueuedMove;
   final String? queuedMoveLabel;
   final VoidCallback onClearQueuedMove;
+  final Widget? debugLogExportButton;
 
   @override
   Widget build(BuildContext context) {
+    final logExportButton = debugLogExportButton;
+    final trailingChildren = <Widget>[
+      ?logExportButton,
+      if (showModeSwitch)
+        CompactModeSwitch(
+          onlineSelected: isOnlineMode,
+          onChanged: (selected) {
+            final callback = onModeChanged;
+            if (callback != null) {
+              callback(selected);
+            }
+          },
+        ),
+    ];
+
     return CollapsibleSettingsCard(
       title: 'Matchmaking',
       isOpen: isOpen,
@@ -96,17 +113,9 @@ class OnlineMatchmakingSettingsCard extends StatelessWidget {
         fallbackIcon: Icons.settings,
         size: 22,
       ),
-      trailing: showModeSwitch
-          ? CompactModeSwitch(
-              onlineSelected: isOnlineMode,
-              onChanged: (selected) {
-                final callback = onModeChanged;
-                if (callback != null) {
-                  callback(selected);
-                }
-              },
-            )
-          : null,
+      trailing: trailingChildren.isEmpty
+          ? null
+          : Row(mainAxisSize: MainAxisSize.min, children: trailingChildren),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxHeight: 320),
         child: Scrollbar(

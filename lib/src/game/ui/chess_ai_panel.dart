@@ -156,6 +156,10 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                   fallbackIcon: Icons.smart_toy_outlined,
                   size: 22,
                 ),
+                trailing: DebugLogExportButton(
+                  logTextProvider: _controller.exportDebugLog,
+                  iconOnly: true,
+                ),
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxHeight: 320),
                   child: Scrollbar(

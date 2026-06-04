@@ -125,6 +125,10 @@ class _GameScreenState extends State<GameScreen> {
                           style: TextStyle(fontWeight: FontWeight.w700),
                         ),
                       ),
+                      DebugLogExportButton(
+                        logTextProvider: _controller.exportDebugLog,
+                        iconOnly: true,
+                      ),
                       CompactModeSwitch(
                         onlineSelected: false,
                         onChanged: (online) {

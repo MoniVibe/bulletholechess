@@ -228,6 +228,10 @@ class _OnlineGamePanelState extends State<OnlineGamePanel>
                 hasQueuedMove: _controller.hasQueuedMove,
                 queuedMoveLabel: _controller.queuedMoveLabel,
                 onClearQueuedMove: _controller.clearQueuedMove,
+                debugLogExportButton: DebugLogExportButton(
+                  logTextProvider: _controller.exportDebugLog,
+                  iconOnly: true,
+                ),
               ),
               const SizedBox(height: 10),
               Expanded(
