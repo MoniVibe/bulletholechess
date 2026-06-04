@@ -6,6 +6,31 @@ import 'package:chess/chess.dart' as chess;
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('dumb AI search does not mutate the supplied game', () {
+    final game = chess.Chess();
+    for (final payload in const <Map<String, String>>[
+      <String, String>{'from': 'e2', 'to': 'e4'},
+      <String, String>{'from': 'e7', 'to': 'e5'},
+      <String, String>{'from': 'g1', 'to': 'f3'},
+    ]) {
+      expect(game.move(payload), isTrue);
+    }
+
+    final beforeFen = game.fen;
+    final beforeHistory = List<dynamic>.from(
+      game.getHistory(<String, dynamic>{'verbose': true}),
+    );
+
+    final ai = DumbAiEngine(random: Random(42));
+    expect(ai.chooseMove(game), isNotNull);
+
+    expect(game.fen, beforeFen);
+    expect(
+      game.getHistory(<String, dynamic>{'verbose': true}),
+      equals(beforeHistory),
+    );
+  });
+
   test('dumb AI does not throw on nightly regression positions', () {
     const failingFens = <String>[
       '8/1N4kr/p7/1p1KP3/P6p/8/P1R5/8 b - - 0 48',

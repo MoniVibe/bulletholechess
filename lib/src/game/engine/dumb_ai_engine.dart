@@ -56,21 +56,22 @@ class DumbAiEngine {
     var bestScore = -_infinity;
     final topMoves = <Map<String, dynamic>>[];
     for (final move in _orderedMoves(moves)) {
+      var moved = false;
       try {
-        final sandbox = game.copy();
-        final moved = sandbox.move(ChessRules.movePayloadFromLegalMove(move));
+        moved = game.move(ChessRules.movePayloadFromLegalMove(move));
         if (!moved) {
           continue;
         }
+        final nextPositionKey = _normalizedPositionKey(game.fen);
 
         var score = _search(
-          game: sandbox,
+          game: game,
           depth: depth - 1,
           alpha: -_infinity,
           beta: _infinity,
           rootColor: rootColor,
         );
-        score -= _rootLoopPenalty(game, move, ownMoveStats);
+        score -= _rootLoopPenalty(move, ownMoveStats, nextPositionKey);
 
         if (score > bestScore) {
           bestScore = score;
@@ -83,6 +84,10 @@ class DumbAiEngine {
       } catch (_) {
         // Keep search resilient in pathological states surfaced by soak runs.
         continue;
+      } finally {
+        if (moved) {
+          game.undo();
+        }
       }
     }
 
@@ -120,18 +125,25 @@ class DumbAiEngine {
     if (maximizing) {
       var value = -_infinity;
       for (final move in _orderedMoves(moves)) {
-        final sandbox = game.copy();
-        final moved = sandbox.move(ChessRules.movePayloadFromLegalMove(move));
-        if (!moved) {
-          continue;
+        var moved = false;
+        late final int score;
+        try {
+          moved = game.move(ChessRules.movePayloadFromLegalMove(move));
+          if (!moved) {
+            continue;
+          }
+          score = _search(
+            game: game,
+            depth: depth - 1,
+            alpha: alpha,
+            beta: beta,
+            rootColor: rootColor,
+          );
+        } finally {
+          if (moved) {
+            game.undo();
+          }
         }
-        final score = _search(
-          game: sandbox,
-          depth: depth - 1,
-          alpha: alpha,
-          beta: beta,
-          rootColor: rootColor,
-        );
         if (score > value) {
           value = score;
         }
@@ -147,18 +159,25 @@ class DumbAiEngine {
 
     var value = _infinity;
     for (final move in _orderedMoves(moves)) {
-      final sandbox = game.copy();
-      final moved = sandbox.move(ChessRules.movePayloadFromLegalMove(move));
-      if (!moved) {
-        continue;
+      var moved = false;
+      late final int score;
+      try {
+        moved = game.move(ChessRules.movePayloadFromLegalMove(move));
+        if (!moved) {
+          continue;
+        }
+        score = _search(
+          game: game,
+          depth: depth - 1,
+          alpha: alpha,
+          beta: beta,
+          rootColor: rootColor,
+        );
+      } finally {
+        if (moved) {
+          game.undo();
+        }
       }
-      final score = _search(
-        game: sandbox,
-        depth: depth - 1,
-        alpha: alpha,
-        beta: beta,
-        rootColor: rootColor,
-      );
       if (score < value) {
         value = score;
       }
@@ -270,9 +289,9 @@ class DumbAiEngine {
   }
 
   int _rootLoopPenalty(
-    chess.Chess game,
     Map<String, dynamic> move,
     _OwnMoveStats ownMoveStats,
+    String nextPositionKey,
   ) {
     final from = move['from'] as String?;
     final to = move['to'] as String?;
@@ -291,7 +310,6 @@ class DumbAiEngine {
       penalty += _immediateBacktrackPenalty;
     }
 
-    final nextPositionKey = _nextPositionKey(game, move);
     final repeatedCount = _recentPositionKeys
         .where((key) => key == nextPositionKey)
         .length;
@@ -348,15 +366,6 @@ class DumbAiEngine {
     }
 
     return centerBonus * 2;
-  }
-
-  String _nextPositionKey(chess.Chess game, Map<String, dynamic> move) {
-    final sandbox = game.copy();
-    final moved = sandbox.move(ChessRules.movePayloadFromLegalMove(move));
-    if (!moved) {
-      return _normalizedPositionKey(game.fen);
-    }
-    return _normalizedPositionKey(sandbox.fen);
   }
 
   void _recordCurrentPosition(chess.Chess game) {
