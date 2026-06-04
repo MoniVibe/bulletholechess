@@ -51,10 +51,11 @@ jobs:
           DEFAULT_BACKEND_URL: ${{ vars.DEFAULT_BACKEND_URL }}
         run: |
           if [ -n "$DEFAULT_BACKEND_URL" ]; then
-            flutter build web --release --base-href=/bulletholechess/ --dart-define=DEFAULT_BACKEND_URL="$DEFAULT_BACKEND_URL"
+            flutter build web --release --base-href=/bulletholechess/ --pwa-strategy=none --dart-define=DEFAULT_BACKEND_URL="$DEFAULT_BACKEND_URL"
           else
-            flutter build web --release --base-href=/bulletholechess/
+            flutter build web --release --base-href=/bulletholechess/ --pwa-strategy=none
           fi
+          cp web/flutter_service_worker_cleanup.js build/web/flutter_service_worker.js
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
