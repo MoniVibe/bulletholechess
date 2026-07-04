@@ -29,11 +29,31 @@ class ChessRules {
 
   static T withTurn<T>(chess.Chess game, String color, T Function() callback) {
     final previousTurn = game.turn;
-    game.turn = toChessColor(color);
+    final requestedTurn = toChessColor(color);
+    // Snapshot the en-passant target. When we force the side-to-move to the
+    // OTHER color, any live en-passant square becomes bogus: it was created for
+    // the natural mover, and move-generation for the forced color can synthesize
+    // an illegal en-passant capture against it. The `chess` 0.8.1 engine
+    // materializes moves for check/checkmate SAN by make/undo directly on this
+    // live board, and undoing that bogus EP capture RESURRECTS a phantom pawn
+    // (observed: a white pawn reappearing on b7 after black's out-of-turn b7-b5
+    // push, the "piece appears out of nowhere" glitch). Clearing the stale EP
+    // square while the turn is flipped mirrors the same defensive reasoning
+    // already applied in `_cloneForColor`, and prevents the corruption at the
+    // single shared seam every out-of-turn read/enumeration flows through.
+    final previousEpSquare = game.ep_square;
+    final flippingTurn = previousTurn != requestedTurn;
+    game.turn = requestedTurn;
+    if (flippingTurn) {
+      game.ep_square = chess.Chess.EMPTY;
+    }
     try {
       return callback();
     } finally {
       game.turn = previousTurn;
+      if (flippingTurn) {
+        game.ep_square = previousEpSquare;
+      }
     }
   }
 
@@ -157,6 +177,11 @@ class ChessRules {
     required String color,
     required String promotion,
   }) {
+    // Snapshot the pre-move position so we can (a) integrity-check the result and
+    // (b) roll back cleanly if the underlying engine produces a corrupt board.
+    final previousFen = _safeFen(game);
+    final beforeCount = previousFen == null ? null : _liveBoardPieceCount(game);
+
     final gameForColor = _cloneForColor(game: game, color: color);
     if (gameForColor == null) {
       return false;
@@ -179,7 +204,49 @@ class ChessRules {
     } catch (_) {
       return false;
     }
+
+    // Board-integrity guard. A single legal ply can only keep or REDUCE the
+    // piece count (captures, en-passant, promotion all preserve or shrink it);
+    // no legal move can add a piece. The cooldown-based out-of-turn variant
+    // repeatedly rewrites the active-color FEN field and reloads through the
+    // `chess` 0.8.1 engine, and that combination can, in rare en-passant/turn-
+    // desync positions, resurrect a phantom pawn (a vacated en-passant square
+    // reappears occupied, sometimes as the wrong color) -- the observed
+    // "a piece appears out of nowhere" glitch. The controllers' existing
+    // revert-guard only checks the mover's destination square and therefore
+    // never catches a phantom that lands on an unrelated square. Catch it here,
+    // at the single shared apply chokepoint, and roll the whole position back so
+    // no caller (local, vs-AI, or online) can ever commit a corrupt board.
+    if (beforeCount != null && previousFen != null) {
+      final afterCount = _liveBoardPieceCount(game);
+      if (afterCount > beforeCount) {
+        _tryLoadFen(game, previousFen);
+        return false;
+      }
+    }
     return true;
+  }
+
+  /// Counts pieces by scanning the engine's live board via `get()` for all 64
+  /// squares. This reads the internal board array directly rather than the FEN
+  /// string, which `chess` 0.8.1 can report stale/clean immediately after a
+  /// `load()` even when the internal state has been corrupted -- the exact case
+  /// that lets an out-of-turn en-passant resurrection ("phantom pawn") slip past
+  /// a FEN-string check.
+  static int _liveBoardPieceCount(chess.Chess game) {
+    var count = 0;
+    for (final file in _files.split('')) {
+      for (var rank = 1; rank <= 8; rank += 1) {
+        try {
+          if (game.get('$file$rank') != null) {
+            count += 1;
+          }
+        } catch (_) {
+          // ignore unreadable squares
+        }
+      }
+    }
+    return count;
   }
 
   static String? detectCheckmateWinner(chess.Chess game) {
