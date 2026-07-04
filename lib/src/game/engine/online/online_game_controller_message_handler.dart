@@ -227,6 +227,25 @@ extension _OnlineGameControllerMessageHandler on OnlineGameController {
       );
       return;
     }
+
+    // Validate the board BEFORE committing any state from this frame. When a
+    // frame carries a FEN that the engine rejects, the whole frame is
+    // untrustworthy: applying its status/result/lastMove/cooldowns while the
+    // board stays on the previously-loaded (rejected) position leaves the client
+    // desynced -- metadata advances off a board we refused to load. Short-circuit
+    // the entire apply. We intentionally do NOT advance `_sequence` here, so a
+    // corrected retransmit (same or next sequence) can still be applied instead
+    // of being swallowed by the duplicate/outdated gate. `chess` 0.8.1's
+    // `load()` validates before mutating, so a rejected FEN leaves `_game`
+    // untouched (board remains the last good position).
+    final fen = state['fen'] as String?;
+    if (fen != null && !_game.load(fen)) {
+      _logEvent('state_invalid_fen', details: <String, Object?>{'fen': fen});
+      _feedback = 'Received invalid board state from server.';
+      notifyListeners();
+      return;
+    }
+
     _sequence = nextSequence;
 
     final serverNow = MultiplayerClientUtils.readInt(state['serverNow']);
@@ -259,15 +278,6 @@ extension _OnlineGameControllerMessageHandler on OnlineGameController {
       if (b != null) {
         _blackReadyAtMs = b;
         receivedCooldownSnapshot = true;
-      }
-    }
-
-    final fen = state['fen'] as String?;
-    if (fen != null) {
-      final loaded = _game.load(fen);
-      if (!loaded) {
-        _logEvent('state_invalid_fen', details: <String, Object?>{'fen': fen});
-        _feedback = 'Received invalid board state from server.';
       }
     }
 
