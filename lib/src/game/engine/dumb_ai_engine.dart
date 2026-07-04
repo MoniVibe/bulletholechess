@@ -108,7 +108,21 @@ class DumbAiEngine {
     required int beta,
     required String rootColor,
   }) {
-    if (depth <= 0 || game.game_over) {
+    // NB: deliberately NOT `game.game_over`. In `chess` 0.8.1 `game_over`
+    // delegates to `in_draw` -> `in_threefold_repetition`, which unwinds and
+    // replays the ENTIRE game history (make/undo + FEN build per ply) on every
+    // call. Called at every interior node of the minimax search on a long
+    // (200+ ply) duel game, that walk fail-fast-crashes the Dart VM (observed
+    // as 0xC0000409 / 0xC0000005). The cheap terminal checks below are
+    // equivalent for the purpose of cutting off the search: checkmate and
+    // stalemate are caught by the empty-legal-move branch that follows, and the
+    // remaining draws are covered by O(1)/O(pieces) checks (fifty-move clock +
+    // insufficient material). Per-node threefold detection is intentionally
+    // dropped — a shallow 2-4 ply search almost never manufactures a real
+    // threefold, and root repetition is handled by `_rootLoopPenalty`.
+    if (depth <= 0 ||
+        game.half_moves >= 100 ||
+        game.insufficient_material) {
       return _evaluate(game, rootColor, depth);
     }
 
@@ -200,7 +214,22 @@ class DumbAiEngine {
       return winner == rootColor ? score : -score;
     }
 
-    if (game.in_stalemate || game.insufficient_material || game.in_draw) {
+    // Draw detection deliberately avoids `game.in_draw`. In the `chess` 0.8.1
+    // package, `in_draw` calls `in_threefold_repetition`, which unwinds and
+    // replays the ENTIRE game history (make/undo + FEN string build per ply)
+    // on every call. Invoked at every leaf of the minimax search on a long
+    // (200+ ply) duel game, that walk explodes in time and stack/heap usage
+    // and fail-fast-crashes the Dart VM (0xC0000409). We use cheap, local
+    // equivalents instead:
+    //   * stalemate / insufficient material are O(1)-ish and history-free;
+    //   * fifty-move draw is a direct O(1) half-move clock read;
+    //   * per-node threefold detection is dropped — a shallow 2-4 ply search
+    //     almost never manufactures a real threefold (which needs the position
+    //     three times including pre-root history), and root-level repetition is
+    //     already handled by `_rootLoopPenalty` / `_recentPositionKeys`.
+    if (game.in_stalemate ||
+        game.insufficient_material ||
+        game.half_moves >= 100) {
       return 0;
     }
 
@@ -446,7 +475,15 @@ class DumbAiEngine {
 
   int _safeMoveCount(chess.Chess game) {
     try {
-      return game.moves().length;
+      // `asObjects: true` returns raw ("ugly") moves and skips SAN rendering.
+      // A bare `game.moves()` call renders SAN for every move, and SAN
+      // disambiguation (`move_to_san` -> `get_disambiguator`) regenerates the
+      // full move list per move — an O(moves^2) blow-up with a deep native
+      // call chain. This mobility count is invoked twice per leaf of the
+      // minimax search, so on long endgame searches that quadratic cost both
+      // dominates runtime and drives the fail-fast stack exhaustion. We only
+      // need the count, so the cheap raw-move list is exactly equivalent.
+      return game.moves(const <String, dynamic>{'asObjects': true}).length;
     } catch (_) {
       return 0;
     }
