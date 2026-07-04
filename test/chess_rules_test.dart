@@ -15,22 +15,38 @@ void main() {
     expect(destinations, isEmpty);
   });
 
-  test('findValidatedLegalMove falls back to legal promotion variant', () {
+  test('findValidatedLegalMove rejects an unsatisfiable promotion request', () {
+    // A promotion square must honor the caller's EXACT requested piece. An
+    // invalid/unsupported promotion ('x') must be rejected (null), never
+    // silently substituted with a different legal promotion ("played a move I
+    // didn't pick" bug). See chess_rules_promotion_fallback_test.dart.
     final game = chess.Chess();
     final loaded = game.load('8/P7/8/8/8/8/8/k6K w - - 0 1');
     expect(loaded, isTrue);
 
-    final legalMove = ChessRules.findValidatedLegalMove(
+    final substituted = ChessRules.findValidatedLegalMove(
       game: game,
       from: 'a7',
       to: 'a8',
       color: 'w',
       promotion: 'x',
     );
+    expect(substituted, isNull);
 
-    expect(legalMove, isNotNull);
-    expect(legalMove!['from'], 'a7');
-    expect(legalMove['to'], 'a8');
+    // A valid, explicit promotion request returns the exact piece.
+    for (final piece in const ['q', 'r', 'b', 'n']) {
+      final legalMove = ChessRules.findValidatedLegalMove(
+        game: game,
+        from: 'a7',
+        to: 'a8',
+        color: 'w',
+        promotion: piece,
+      );
+      expect(legalMove, isNotNull, reason: 'a7-a8=$piece should be legal');
+      expect(legalMove!['from'], 'a7');
+      expect(legalMove['to'], 'a8');
+      expect(legalMove['promotion'], piece);
+    }
   });
 
   test('movePayloadFromLegalMove excludes promotion when not present', () {

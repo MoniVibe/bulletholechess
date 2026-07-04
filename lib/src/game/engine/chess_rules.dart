@@ -90,21 +90,65 @@ class ChessRules {
       return null;
     }
 
-    for (final move in legalMoves) {
-      if (move['promotion'] == promotion) {
-        return move;
+    // NOTE: the `chess` 0.8.1 verbose move map does NOT populate a 'promotion'
+    // key; the chosen promotion piece is only encoded in the SAN string
+    // (e.g. "b8=Q", "bxa8=N"). We derive it from SAN and stamp a normalized
+    // 'promotion' onto the returned map so downstream payload construction
+    // (movePayloadFromLegalMove) selects the EXACT piece the caller asked for
+    // instead of silently defaulting/substituting.
+    final promotionMoves =
+        legalMoves.where(_isPromotionMove).toList(growable: false);
+
+    if (promotionMoves.isEmpty) {
+      // Non-promotion (from,to): the promotion argument is irrelevant. Return
+      // the single legal move (there is at most one non-promotion move per
+      // from/to pair).
+      return legalMoves.first;
+    }
+
+    // Promotion square: honor the caller's exact requested piece. If it is not
+    // among the legal promotion candidates, REJECT rather than silently
+    // executing a different promotion ("played a move I didn't pick" bug).
+    final requested = promotion.trim().toLowerCase();
+    for (final move in promotionMoves) {
+      if (_promotionPieceFromSan(move) == requested) {
+        return _withResolvedPromotion(move, requested);
       }
     }
 
-    for (final move in legalMoves) {
-      if (move['promotion'] == null) {
-        return move;
-      }
-    }
+    return null;
+  }
 
-    // When callers pass a stale/unsupported promotion choice, still return a
-    // legal option so upstream code can recover with a valid payload.
-    return legalMoves.first;
+  /// Reads the promotion piece letter ('q'/'r'/'b'/'n') from a verbose move's
+  /// SAN (e.g. "b8=Q", "bxa8=N+"), lower-cased. Returns null when the move is
+  /// not a promotion or the SAN cannot be parsed.
+  static String? _promotionPieceFromSan(Map<String, dynamic> legalMove) {
+    final existing = legalMove['promotion'];
+    if (existing is String && existing.isNotEmpty) {
+      return existing.toLowerCase();
+    }
+    final san = legalMove['san'];
+    if (san is! String) {
+      return null;
+    }
+    final eq = san.indexOf('=');
+    if (eq < 0 || eq + 1 >= san.length) {
+      return null;
+    }
+    final piece = san[eq + 1].toLowerCase();
+    if (!'qrbn'.contains(piece)) {
+      return null;
+    }
+    return piece;
+  }
+
+  static Map<String, dynamic> _withResolvedPromotion(
+    Map<String, dynamic> legalMove,
+    String promotion,
+  ) {
+    final resolved = Map<String, dynamic>.from(legalMove);
+    resolved['promotion'] = promotion;
+    return resolved;
   }
 
   static bool applyValidatedLegalMoveForColor({
