@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:chess/chess.dart' as chess;
+import 'package:meta/meta.dart';
 
 import 'chess_rules.dart';
 
@@ -397,6 +398,11 @@ class DumbAiEngine {
   _OwnMoveStats _collectOwnMoveStats(chess.Chess game) {
     final currentSideIsWhite = game.turn == chess.Color.WHITE;
     final history = game.getHistory(<String, dynamic>{'verbose': true});
+    // The verbose history entry omits the mover color, so we read it from the
+    // parallel State list. This variant allows a side to move twice in a row,
+    // which breaks the old index-parity color labeling (every ply after a
+    // double-move was mislabeled), corrupting own-move repetition penalties.
+    final states = game.history;
     final moveCountByKey = <String, int>{};
     String? lastFrom;
     String? lastTo;
@@ -407,7 +413,9 @@ class DumbAiEngine {
       if (entry is! Map) {
         continue;
       }
-      final sideIsWhite = i.isEven;
+      final sideIsWhite = i < states.length
+          ? states[i].move.color == chess.Color.WHITE
+          : i.isEven;
       if (sideIsWhite != currentSideIsWhite) {
         continue;
       }
@@ -428,6 +436,13 @@ class DumbAiEngine {
       lastTo: lastTo,
     );
   }
+
+  /// Test-only view of the own-move repetition stats for the side to move.
+  /// Exposes the count-by-`from-to`-key map so tests can assert that plies are
+  /// attributed to the correct color even when a side moves twice in a row.
+  @visibleForTesting
+  Map<String, int> debugOwnMoveCounts(chess.Chess game) =>
+      Map<String, int>.from(_collectOwnMoveStats(game).moveCountByKey);
 
   int _safeMoveCount(chess.Chess game) {
     try {

@@ -212,7 +212,12 @@ extension _OnlineGameControllerMessageHandler on OnlineGameController {
 
   void _applyState(Map<String, dynamic> state) {
     final nextSequence = state['sequence'] as int? ?? (_sequence + 1);
-    if (nextSequence < _sequence) {
+    // Drop strictly-older frames AND exact duplicates of the last applied
+    // sequence (WS reconnect retransmits the last frame verbatim, which would
+    // otherwise re-run last-move-highlight / queue-confirm side effects and
+    // produce a "ghost" move). The omitted-sequence path defaults nextSequence
+    // to _sequence + 1, so it is never equal and keeps applying normally.
+    if (nextSequence <= _sequence) {
       _logEvent(
         'state_ignored_outdated',
         details: <String, Object?>{
