@@ -12,11 +12,31 @@ extension _CooldownForfeitHelpers on _ChessNetworkAiSession {
   }
 
   bool _isBlockedByForfeitLock(String color) {
+    _resolveForfeitLockTimeoutIfNeeded();
     final lock = _forfeitLock;
     if (lock == null) {
       return false;
     }
     return lock['blockedColor'] == color;
+  }
+
+  /// Liveness fallback mirroring the app controller: clear a latched forfeit
+  /// lock once the release-by color's cooldown has elapsed. Without this, if the
+  /// harness latches a SET lock and never observes a subsequent CLEARED payload
+  /// (dropped/misordered frame), `_isBlockedByForfeitLock` would keep the client
+  /// blocked indefinitely -- the wedge seen in network-ai-chess-qa-prod-a.
+  void _resolveForfeitLockTimeoutIfNeeded() {
+    final lock = _forfeitLock;
+    if (lock == null) {
+      return;
+    }
+    final releaseBy = lock['releaseByColor'];
+    if (releaseBy is! String || (releaseBy != 'w' && releaseBy != 'b')) {
+      return;
+    }
+    if (_cooldownRemainingMs(releaseBy) <= 0) {
+      _forfeitLock = null;
+    }
   }
 
   void _updateClockOffset(dynamic serverNowRaw) {
