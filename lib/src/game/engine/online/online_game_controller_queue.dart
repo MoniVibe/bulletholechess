@@ -6,6 +6,7 @@ extension _OnlineGameControllerQueue on OnlineGameController {
       return;
     }
     _resolveForfeitLockTimeoutIfNeeded();
+    _maybeTimeoutInFlight();
 
     if (_status == 'active') {
       _tryExecuteQueuedPlayerMove();
@@ -14,6 +15,50 @@ extension _OnlineGameControllerQueue on OnlineGameController {
     if (_status == 'active' || hasQueuedMove) {
       notifyListeners();
     }
+  }
+
+  /// Liveness fallback: if a move has been in flight longer than
+  /// [OnlineGameController._inFlightTimeout] (measured on the injected clock via
+  /// the estimated server-now), force-clear the in-flight tracking. This guards
+  /// against a silently dropped move where the server neither echoes the
+  /// clientMoveId as `lastMove` nor sends an `error` frame, which would
+  /// otherwise wedge `_moveInFlight` forever and block all further moves.
+  void _maybeTimeoutInFlight() {
+    if (!_moveInFlight) {
+      return;
+    }
+    final startedAt = _moveInFlightAtMs;
+    if (startedAt == null) {
+      return;
+    }
+    final elapsed = _estimatedServerNowMs() - startedAt;
+    if (elapsed < OnlineGameController._inFlightTimeout.inMilliseconds) {
+      return;
+    }
+    _logEvent(
+      'in_flight_timeout',
+      details: <String, Object?>{
+        'clientMoveId': _inFlightClientMoveId,
+        'source': _inFlightMoveSource,
+        'queueToken': _inFlightQueueToken,
+        'elapsedMs': elapsed,
+      },
+    );
+    _clearInFlight();
+  }
+
+  /// Central reset for all in-flight move tracking. Every code path that ends
+  /// the current in-flight attempt (confirm, terminal frame, move-related
+  /// error, timeout, disconnect) funnels through here so the flag and its
+  /// satellites can never drift apart.
+  void _clearInFlight() {
+    _moveInFlight = false;
+    _inFlightClientMoveId = null;
+    _inFlightMoveSource = null;
+    _inFlightQueueToken = null;
+    _inFlightFrom = null;
+    _inFlightTo = null;
+    _moveInFlightAtMs = null;
   }
 
   bool _sendMove({
@@ -73,6 +118,9 @@ extension _OnlineGameControllerQueue on OnlineGameController {
     _inFlightClientMoveId = moveId;
     _inFlightMoveSource = source;
     _inFlightQueueToken = queueToken;
+    _inFlightFrom = from;
+    _inFlightTo = to;
+    _moveInFlightAtMs = _estimatedServerNowMs();
     _logEvent(
       'send_move_payload',
       details: <String, Object?>{

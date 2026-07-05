@@ -34,6 +34,40 @@ extension _OnlineGameControllerClockForfeit on OnlineGameController {
         lowered.contains('stale');
   }
 
+  /// Whether a server `error` frame pertains to the in-flight move (a move
+  /// rejection) rather than an unrelated failure (piece-skin / new_game /
+  /// parse / unknown-type). The server sends `type:'error'` for both and does
+  /// not echo the clientMoveId on errors, so classification is by the set of
+  /// codes/messages the move handler in `websocket.js` emits when rejecting a
+  /// move. Move-related errors end the current in-flight attempt; unrelated
+  /// ones must leave it untouched so a legitimate move stays tracked.
+  static const Set<String> _moveRejectionCodes = <String>{
+    'cooldown_active',
+    'forfeit_waiting_release',
+    'stale_state',
+    'waiting_for_opponent',
+    'from_square_empty',
+    'piece_not_owned',
+    'destination_occupied_by_own_piece',
+  };
+
+  bool _isMoveRelatedError(String? code, String message) {
+    if (code != null && _moveRejectionCodes.contains(code)) {
+      return true;
+    }
+    // Retriable-queue errors are inherently move-related.
+    if (_isRetriableQueueError(code, message)) {
+      return true;
+    }
+    // Code-less move rejections the server emits by message only.
+    final lowered = message.toLowerCase();
+    return lowered.contains('illegal move') ||
+        lowered.contains('invalid move') ||
+        lowered.contains('no legal moves') ||
+        lowered.contains('waiting for opponent') ||
+        lowered.contains('game over');
+  }
+
   bool _isBlockedByForfeitLock(String color, {bool resolveTimeout = true}) {
     if (_forfeitBlockedColor != color) {
       return false;

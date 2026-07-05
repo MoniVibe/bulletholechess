@@ -24,6 +24,10 @@ class OnlineGameController extends ChangeNotifier {
   );
   static const Duration _defaultHealthTimeout = Duration(seconds: 5);
   static const Duration _defaultWakeTimeout = Duration(seconds: 15);
+  // Upper bound on how long a move may stay in flight before the ticker
+  // force-clears it as a liveness fallback. Generous relative to cooldown so it
+  // never races a legitimate slow ack.
+  static const Duration _inFlightTimeout = Duration(seconds: 5);
   static const int _maxDebugLogEntries = 400;
 
   OnlineGameController({
@@ -112,6 +116,15 @@ class OnlineGameController extends ChangeNotifier {
   int? _inFlightClientMoveId;
   String? _inFlightMoveSource;
   int? _inFlightQueueToken;
+  // From/to of the in-flight move, used by the no-echo confirm fallback in
+  // `_applyState` for backends that don't echo `clientMoveId` in `lastMove`.
+  String? _inFlightFrom;
+  String? _inFlightTo;
+  // Wall-clock (injected clock) timestamp when the current move went in-flight.
+  // Used by the ticker to bound how long a move can stay unacked so a silently
+  // dropped move (server never echoes clientMoveId AND never sends an error)
+  // cannot wedge `_moveInFlight` forever. Null when no move is in flight.
+  int? _moveInFlightAtMs;
   final List<String> _debugLogEntries = <String>[];
   final GameSessionLogger _sessionLogger = GameSessionLogger(
     applicationId: 'bulletholechess',
@@ -147,6 +160,16 @@ class OnlineGameController extends ChangeNotifier {
   bool get hasQueuedMove => _queuedMoveFrom != null && _queuedMoveTo != null;
   String? get queuedMoveFrom => _queuedMoveFrom;
   String? get queuedMoveTo => _queuedMoveTo;
+
+  /// Test-only view of the in-flight move tracking. Exposed so the online
+  /// suite can assert the gated-clear behavior (Items F2/F3) directly rather
+  /// than only through indirect side effects.
+  @visibleForTesting
+  bool get debugMoveInFlight => _moveInFlight;
+  @visibleForTesting
+  int? get debugInFlightClientMoveId => _inFlightClientMoveId;
+  @visibleForTesting
+  String? get debugForfeitBlockedColor => _forfeitBlockedColor;
   String? get queuedMoveLabel {
     if (!hasQueuedMove) {
       return null;
@@ -532,7 +555,7 @@ class OnlineGameController extends ChangeNotifier {
         'connectionState': _connectionState.name,
       },
     );
-    _moveInFlight = false;
+    _clearInFlight();
     _clearSelection();
     _clearQueuedMove();
     await _transportClient.disconnect();
@@ -556,9 +579,6 @@ class OnlineGameController extends ChangeNotifier {
     _result = null;
     _sequence = 0;
     _clockOffsetMs = 0;
-    _inFlightClientMoveId = null;
-    _inFlightMoveSource = null;
-    _inFlightQueueToken = null;
     final now = _now().millisecondsSinceEpoch;
     _whiteReadyAtMs = now;
     _blackReadyAtMs = now;
@@ -781,9 +801,16 @@ class OnlineGameController extends ChangeNotifier {
     );
     _disposed = true;
     _ticker.cancel();
-    disconnect(notify: false);
+    // Sequence the async teardown so we don't close the http client out from
+    // under an in-flight `disconnect()` (the transport client wraps the same
+    // http client). Capture the future, observe its errors, and close the
+    // owned http client only after disconnect settles. `notifyListeners` is
+    // already dispose-guarded, so late transport callbacks are inert.
+    final teardown = disconnect(notify: false);
     if (_ownsHttpClient) {
-      _httpClient.close();
+      teardown.whenComplete(() => _httpClient.close()).catchError((Object _) {});
+    } else {
+      teardown.catchError((Object _) {});
     }
     super.dispose();
   }

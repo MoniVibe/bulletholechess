@@ -142,12 +142,17 @@ extension _OnlineGameControllerMessageHandler on OnlineGameController {
         notifyListeners();
         return;
       case 'error':
-        _moveInFlight = false;
-        _inFlightClientMoveId = null;
-        _inFlightMoveSource = null;
-        _inFlightQueueToken = null;
         final errorCode = map['code'] as String?;
         final message = map['message'] as String? ?? 'Server error';
+        // Only end the current in-flight attempt when the error actually
+        // pertains to the move (a move rejection) -- an unrelated error
+        // (skin/new_game/parse/unknown-type) arriving mid-flight must NOT clear
+        // the flag, or a premature second move could be emitted before the real
+        // ack. The server sends `type:'error'` for both classes and does not
+        // echo the clientMoveId on errors, so we discriminate by code/message.
+        if (_isMoveRelatedError(errorCode, message)) {
+          _clearInFlight();
+        }
         _feedback = message;
         final serverNow = MultiplayerClientUtils.readInt(map['serverNow']);
         if (serverNow != null) {
@@ -354,22 +359,34 @@ extension _OnlineGameControllerMessageHandler on OnlineGameController {
         );
         _clearQueuedMove();
       }
-      if (_myColor != null &&
-          moverColor == _myColor &&
-          _inFlightClientMoveId != null &&
-          lastMoveId != null &&
-          _inFlightClientMoveId == lastMoveId) {
-        _logEvent(
-          'in_flight_move_confirmed',
-          details: <String, Object?>{
-            'clientMoveId': lastMoveId,
-            'source': lastMoveSource,
-            'queueToken': lastMoveQueueToken,
-          },
-        );
-        _inFlightClientMoveId = null;
-        _inFlightMoveSource = null;
-        _inFlightQueueToken = null;
+      if (_moveInFlight && _myColor != null && moverColor == _myColor) {
+        // Primary confirm: the frame echoes our in-flight clientMoveId.
+        final idEchoConfirms =
+            _inFlightClientMoveId != null &&
+            lastMoveId != null &&
+            _inFlightClientMoveId == lastMoveId;
+        // No-echo fallback: older/relay backends may not echo `clientMoveId`.
+        // If this frame shows OUR color as the mover and the from/to match our
+        // in-flight move, treat it as confirmation so the in-flight flag can
+        // never wedge waiting for an id that will never arrive.
+        final noEchoConfirms =
+            lastMoveId == null &&
+            _inFlightFrom != null &&
+            _inFlightTo != null &&
+            _lastMoveFrom == _inFlightFrom &&
+            _lastMoveTo == _inFlightTo;
+        if (idEchoConfirms || noEchoConfirms) {
+          _logEvent(
+            'in_flight_move_confirmed',
+            details: <String, Object?>{
+              'clientMoveId': lastMoveId,
+              'source': lastMoveSource,
+              'queueToken': lastMoveQueueToken,
+              'confirmedVia': idEchoConfirms ? 'id_echo' : 'no_echo_fallback',
+            },
+          );
+          _clearInFlight();
+        }
       }
     } else {
       final history = state['history'];
@@ -385,7 +402,16 @@ extension _OnlineGameControllerMessageHandler on OnlineGameController {
       }
     }
 
-    _moveInFlight = false;
+    // In-flight tracking is cleared ONLY when this frame actually confirms our
+    // move (the lastMove block above) or the game reached a terminal state.
+    // It is NOT cleared unconditionally: in this simultaneous-move variant an
+    // opponent frame arrives while our move is still unacked, and clearing here
+    // would defeat the `_sendMove` / `clearQueuedMove` in-flight guards and let
+    // a premature second move through. A silently dropped move is handled by
+    // the bounded in-flight timeout on the ticker.
+    if (_status == 'game_over' || _result != null) {
+      _clearInFlight();
+    }
     _logEvent(
       'state_applied',
       details: <String, Object?>{
