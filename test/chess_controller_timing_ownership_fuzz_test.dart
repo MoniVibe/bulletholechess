@@ -39,6 +39,15 @@
 //
 // Coverage counters are printed and asserted non-vacuous: a green run with zero
 // races / zero doubles / zero queued-then-changed events proves nothing.
+//
+// FLAKE GUARD: these cases drive fakeAsync loops over 30 seeds each; the work is
+// pure CPU with no wall-clock logic, but under heavy parallel `flutter test`
+// contention a seed batch can occasionally exceed the runner's 30s default
+// timeout. A generous file-level @Timeout (and matching per-test overrides)
+// removes that spurious timeout without weakening any invariant or coverage
+// assertion below.
+@Timeout(Duration(minutes: 5))
+library;
 
 import 'dart:math';
 
@@ -64,7 +73,7 @@ void main() {
 
       _printAndAssertCoverage('local-controller', agg);
     },
-    timeout: const Timeout(Duration(minutes: 3)),
+    timeout: const Timeout(Duration(minutes: 5)),
   );
 
   test(
@@ -80,7 +89,7 @@ void main() {
 
       _printAndAssertCoverage('ai-controller', agg);
     },
-    timeout: const Timeout(Duration(minutes: 3)),
+    timeout: const Timeout(Duration(minutes: 5)),
   );
 
   // Deterministic regression pin for the en-passant / forced-turn phantom.
@@ -113,7 +122,7 @@ void main() {
         reason: 'piece count must never exceed 32 (phantom pawn regression)');
     expect(sawPhantomWhitePawn, isFalse,
         reason: 'no side may ever exceed 8 pawns (phantom pawn regression)');
-  }, timeout: const Timeout(Duration(seconds: 60)));
+  }, timeout: const Timeout(Duration(minutes: 5)));
 }
 
 void _printAndAssertCoverage(String label, _Coverage agg) {

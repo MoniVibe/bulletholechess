@@ -1,6 +1,7 @@
 import 'package:bullethole_shared/bullethole_shared.dart';
 import 'package:flutter/material.dart';
 
+import '../engine/online_game_controller.dart';
 import 'app_assets.dart';
 import 'chess_ai_panel.dart';
 import 'online_game_panel.dart';
@@ -10,7 +11,12 @@ enum _ChessMode { vsAi, online }
 
 /// Chess-only shell with explicit local-vs-AI and online modes.
 class ChessGameScreen extends StatefulWidget {
-  const ChessGameScreen({super.key});
+  const ChessGameScreen({super.key, this.onlineControllerFactory});
+
+  /// Test-only seam forwarded to [OnlineGamePanel] so widget tests can supply a
+  /// controller with a stubbed HTTP client. Null in production.
+  @visibleForTesting
+  final OnlineGameController Function()? onlineControllerFactory;
 
   @override
   State<ChessGameScreen> createState() => _ChessGameScreenState();
@@ -71,7 +77,11 @@ class _ChessGameScreenState extends State<ChessGameScreen> {
                         Expanded(
                           child: _mode == _ChessMode.vsAi
                               ? const ChessAiPanel()
-                              : const OnlineGamePanel(showModeSwitch: false),
+                              : OnlineGamePanel(
+                                  showModeSwitch: false,
+                                  controllerFactory:
+                                      widget.onlineControllerFactory,
+                                ),
                         ),
                       ],
                     ),
