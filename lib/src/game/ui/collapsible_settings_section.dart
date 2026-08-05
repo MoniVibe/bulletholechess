@@ -57,7 +57,9 @@ class CollapsibleSettingsSection extends StatelessWidget {
             ),
           ),
           AnimatedCrossFade(
-            firstChild: const SizedBox.shrink(),
+            // Keep the collapsed child full-width so form fields in the
+            // hidden section never receive a zero-width constraint.
+            firstChild: const SizedBox(width: double.infinity, height: 0),
             secondChild: Padding(
               // Keep spacing local to section so parent settings stay compact.
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),

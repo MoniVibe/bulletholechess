@@ -1,5 +1,5 @@
 name: bulletholechess
-description: "A new Flutter project."
+description: "Fast bullet-hole chess with local AI and synchronized online play."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -40,7 +40,7 @@ dependencies:
   bullethole_shared:
     git:
       url: https://github.com/MoniVibe/pureflutter.git
-      ref: 30f6d06530b00c6ac773cd591e068473c91d3066
+      ref: f3ef45a
 
 dev_dependencies:
   flutter_test:

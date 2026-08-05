@@ -41,7 +41,9 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
     if (ratio <= 0) {
       return value;
     }
-    return (value * ratio).floorToDouble() / ratio;
+    // Avoid losing a physical pixel to floating-point noise when a snapped
+    // board size is added to the integer timer/gap bands.
+    return ((value * ratio) + 1e-6).floorToDouble() / ratio;
   }
 
   @override
@@ -223,6 +225,15 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                                 _selectedCooldownSeconds = value;
                               });
                             },
+                          ),
+                          const SizedBox(height: 6),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'Bullet-hole play: move when your window is live. If you move during cooldown, the queued squares glow and the move executes when ready.',
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: const Color(0xFF6A635A)),
+                            ),
                           ),
                           const SizedBox(height: 8),
                           CollapsibleSettingsSection(
