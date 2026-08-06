@@ -30,11 +30,13 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
 
   late final ChessAiGameController _controller;
   late final ScrollController _settingsScrollController;
+  final InterstitialAdService _interstitial = InterstitialAdService();
   bool _menuOpen = true;
   bool _isBoardSettingsOpen = false;
   String _selectedBoardSkinId = SkinCatalog.defaultChessBoardSkinId;
   String _selectedPlayerPieceSkinId = SkinCatalog.defaultChessPieceSkinId;
-  _PlayAsChoice _playAsChoice = _PlayAsChoice.white;
+  // Sides are randomized per game; the dropdown can still override.
+  _PlayAsChoice _playAsChoice = _PlayAsChoice.random;
   int _selectedCooldownSeconds = 3;
   // Selected check-timer preset (seconds), or _checkTimeoutCustomSentinel.
   int _selectedCheckTimeoutSeconds = 30;
@@ -74,14 +76,26 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
       text: '$_customCheckTimeoutSeconds',
     );
     _settingsScrollController = ScrollController();
+    _interstitial.load();
   }
 
   @override
   void dispose() {
     _customCheckController.dispose();
     _settingsScrollController.dispose();
+    _interstitial.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  /// Show an interstitial (if one is warm), then start a fresh game. The new
+  /// game always begins even if no ad was available.
+  void _replayWithAd() {
+    _interstitial.showThen(() {
+      if (mounted) {
+        _startNewGame();
+      }
+    });
   }
 
   @override
@@ -490,8 +504,8 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                                   child: _buildVictoryOverlay(
                                     title: _victoryTitle(),
                                     subtitle: _victorySubtitle(),
-                                    actionLabel: 'New Game',
-                                    onAction: _startNewGame,
+                                    actionLabel: 'Replay',
+                                    onAction: _replayWithAd,
                                   ),
                                 )
                               else if (!hasActiveGame)
@@ -783,15 +797,24 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
     return '${halfSecondValue.toStringAsFixed(1)}s';
   }
 
+  bool get _playerWon {
+    final winner = _controller.winnerLabel;
+    if (winner == null) {
+      return false;
+    }
+    final playerIsWhite = _controller.playerColor == 'w';
+    return (winner == 'White' && playerIsWhite) ||
+        (winner == 'Black' && !playerIsWhite);
+  }
+
   String _victoryTitle() {
     if (_controller.isDraw) {
       return 'Draw';
     }
-    final winner = _controller.winnerLabel;
-    if (winner != null) {
-      return '$winner Wins';
+    if (_controller.winnerLabel == null) {
+      return 'Game Over';
     }
-    return 'Game Over';
+    return _playerWon ? 'Victory' : 'Defeat';
   }
 
   String _victorySubtitle() {
@@ -871,10 +894,18 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(
-                            Icons.emoji_events_rounded,
-                            color: Color(0xFFFFD26A),
-                            size: 30,
+                          Icon(
+                            _controller.isDraw
+                                ? Icons.handshake_rounded
+                                : (_playerWon
+                                      ? Icons.emoji_events_rounded
+                                      : Icons.flag_rounded),
+                            color: _controller.isDraw
+                                ? const Color(0xFFB0BEC5)
+                                : (_playerWon
+                                      ? const Color(0xFFFFD26A)
+                                      : const Color(0xFFEF7A7A)),
+                            size: 32,
                           ),
                           const SizedBox(height: 8),
                           Text(
