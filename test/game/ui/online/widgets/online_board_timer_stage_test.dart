@@ -6,13 +6,13 @@ import 'package:bulletholechess/src/game/ui/app_assets.dart';
 import 'package:bulletholechess/src/game/ui/online/widgets/online_board_timer_stage.dart';
 
 void main() {
-  Widget _wrap(Widget child) {
+  Widget wrap(Widget child) {
     return MaterialApp(
       home: Scaffold(body: SizedBox(width: 500, height: 700, child: child)),
     );
   }
 
-  OnlineBoardTimerStage _buildStage({
+  OnlineBoardTimerStage buildStage({
     required bool isConnected,
     required bool canStart,
     required bool isWaitingForOpponent,
@@ -78,8 +78,8 @@ void main() {
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
-      _wrap(
-        _buildStage(
+      wrap(
+        buildStage(
           isConnected: false,
           canStart: false,
           isWaitingForOpponent: false,
@@ -101,8 +101,8 @@ void main() {
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
-      _wrap(
-        _buildStage(
+      wrap(
+        buildStage(
           isConnected: true,
           canStart: true,
           isWaitingForOpponent: true,
@@ -121,8 +121,8 @@ void main() {
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
-      _wrap(
-        _buildStage(
+      wrap(
+        buildStage(
           isConnected: true,
           canStart: true,
           isWaitingForOpponent: false,
@@ -142,8 +142,8 @@ void main() {
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
-      _wrap(
-        _buildStage(
+      wrap(
+        buildStage(
           isConnected: true,
           canStart: true,
           isWaitingForOpponent: false,
@@ -161,8 +161,8 @@ void main() {
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
-      _wrap(
-        _buildStage(
+      wrap(
+        buildStage(
           isConnected: true,
           canStart: true,
           isWaitingForOpponent: false,

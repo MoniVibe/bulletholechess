@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_print
+
 part of '../network_ai_duel_client.dart';
 
 class _Config {
