@@ -13,10 +13,12 @@ class ChessAiGameController extends ChangeNotifier {
   ChessAiGameController({
     this.aiMoveDelay = const Duration(milliseconds: 550),
     Duration initialCooldownDuration = const Duration(seconds: 3),
+    Duration initialCheckTimeoutDuration = const Duration(seconds: 30),
     DumbAiEngine? aiEngine,
     DateTime Function()? nowProvider,
   }) : _aiEngine = aiEngine ?? DumbAiEngine(),
        _cooldownDuration = initialCooldownDuration,
+       _checkTimeoutDuration = initialCheckTimeoutDuration,
        _now = nowProvider ?? DateTime.now {
     _cooldowns = TurnCooldownTracker(
       nowMsProvider: () => _now().millisecondsSinceEpoch,
@@ -49,6 +51,13 @@ class ChessAiGameController extends ChangeNotifier {
   bool _hasActiveGame = false;
 
   Duration _cooldownDuration;
+  Duration _checkTimeoutDuration;
+  // Epoch-ms deadlines by which a checked side must escape, or it loses.
+  // Null means that color is not currently on a check clock.
+  int? _whiteCheckDeadlineMs;
+  int? _blackCheckDeadlineMs;
+  // Set to the color that ran out of check time (a game-ending loss).
+  String? _checkTimeoutLoserColor;
   String _playerColor = 'w';
   String? _selectedSquare;
   Set<String> _legalTargets = <String>{};
@@ -64,15 +73,61 @@ class ChessAiGameController extends ChangeNotifier {
   String get aiColor => ChessRules.oppositeColor(_playerColor);
   String get turnColor => ChessRules.colorCode(_game.turn);
   Duration get cooldownDuration => _cooldownDuration;
+  Duration get checkTimeoutDuration => _checkTimeoutDuration;
+  bool get hasCheckTimeout => _checkTimeoutDuration.inMilliseconds > 0;
+  bool get isCheckTimeoutLoss => _checkTimeoutLoserColor != null;
+  String? get checkTimeoutLoserColor => _checkTimeoutLoserColor;
   bool get hasActiveGame => _hasActiveGame;
-  bool get isGameOver => _game.game_over;
+  bool get isGameOver => _game.game_over || _checkTimeoutLoserColor != null;
   bool get isCheckmate => _game.in_checkmate;
   bool get isDraw => _game.in_draw;
   String? get winnerLabel {
+    if (_checkTimeoutLoserColor != null) {
+      return _checkTimeoutLoserColor == 'w' ? 'Black' : 'White';
+    }
     if (!isCheckmate) {
       return null;
     }
     return turnColor == 'w' ? 'Black' : 'White';
+  }
+
+  /// The color currently on a check clock, if any. Prefers the player's own
+  /// color so the UI surfaces the player's danger ahead of the opponent's.
+  String? get checkTimerColor {
+    if (_deadlineForColor(_playerColor) != null) {
+      return _playerColor;
+    }
+    final opponent = aiColor;
+    if (_deadlineForColor(opponent) != null) {
+      return opponent;
+    }
+    return null;
+  }
+
+  bool get isCheckCountdownActive =>
+      _hasActiveGame && !isGameOver && hasCheckTimeout && checkTimerColor != null;
+
+  Duration checkTimeRemaining(String color) {
+    final deadline = _deadlineForColor(color);
+    if (deadline == null) {
+      return Duration.zero;
+    }
+    final remainingMs = deadline - _now().millisecondsSinceEpoch;
+    if (remainingMs <= 0) {
+      return Duration.zero;
+    }
+    return Duration(milliseconds: remainingMs);
+  }
+
+  int? _deadlineForColor(String color) =>
+      color == 'w' ? _whiteCheckDeadlineMs : _blackCheckDeadlineMs;
+
+  void _setDeadlineForColor(String color, int? readyAtMs) {
+    if (color == 'w') {
+      _whiteCheckDeadlineMs = readyAtMs;
+    } else {
+      _blackCheckDeadlineMs = readyAtMs;
+    }
   }
 
   bool get aiThinking => _aiThinking;
@@ -110,6 +165,11 @@ class ChessAiGameController extends ChangeNotifier {
       return 'Start a new game to begin.';
     }
     if (isGameOver) {
+      if (_checkTimeoutLoserColor != null) {
+        final loser = _checkTimeoutLoserColor == 'w' ? 'White' : 'Black';
+        final winner = _checkTimeoutLoserColor == 'w' ? 'Black' : 'White';
+        return '$loser ran out of check time. $winner wins.';
+      }
       if (_game.in_checkmate) {
         final winner = turnColor == 'w' ? 'Black' : 'White';
         return '$winner wins by checkmate.';
@@ -118,6 +178,15 @@ class ChessAiGameController extends ChangeNotifier {
         return 'Draw game.';
       }
       return 'Game over.';
+    }
+    final checkColor = checkTimerColor;
+    if (checkColor != null) {
+      final formatted = _formatStatusDuration(checkTimeRemaining(checkColor));
+      if (checkColor == _playerColor) {
+        return 'Check! Escape in $formatted or you lose.';
+      }
+      final sideLabel = checkColor == 'w' ? 'White' : 'Black';
+      return '$sideLabel is in check ($formatted to escape).';
     }
     final remaining = cooldownRemaining(_playerColor);
     if (hasQueuedMove) {
@@ -165,16 +234,24 @@ class ChessAiGameController extends ChangeNotifier {
     return '${halfSecondValue.toStringAsFixed(1)}s';
   }
 
-  void startNewGame({required bool playerAsWhite, Duration? cooldownDuration}) {
+  void startNewGame({
+    required bool playerAsWhite,
+    Duration? cooldownDuration,
+    Duration? checkTimeoutDuration,
+  }) {
     _cancelAiMoveTimer();
     if (cooldownDuration != null) {
       _cooldownDuration = cooldownDuration;
+    }
+    if (checkTimeoutDuration != null) {
+      _checkTimeoutDuration = checkTimeoutDuration;
     }
     _sessionLogger.beginSession(
       sessionLabel: 'new_game',
       context: <String, Object?>{
         'playerAsWhite': playerAsWhite,
         'cooldownSeconds': _cooldownDuration.inSeconds,
+        'checkTimeoutSeconds': _checkTimeoutDuration.inSeconds,
       },
     );
     _game.reset();
@@ -188,6 +265,9 @@ class ChessAiGameController extends ChangeNotifier {
     _aiLastMoveTo = null;
     _moveHistory.clear();
     _clearQueuedMove();
+    _whiteCheckDeadlineMs = null;
+    _blackCheckDeadlineMs = null;
+    _checkTimeoutLoserColor = null;
     _cooldowns.resetReadyNow();
     _clearSelection();
     _scheduleAiMoveIfNeeded();
@@ -363,6 +443,7 @@ class ChessAiGameController extends ChangeNotifier {
       turnIndex: _derivedTurnIndex(),
       actionIndexOrPlyIndex: _derivedActionIndex(),
     );
+    _evaluateCheckTimers();
     notifyListeners();
   }
 
@@ -467,11 +548,17 @@ class ChessAiGameController extends ChangeNotifier {
       turnIndex: _derivedTurnIndex(),
       actionIndexOrPlyIndex: _derivedActionIndex(),
     );
+    _evaluateCheckTimers();
     notifyListeners();
   }
 
   void _onTick() {
     if (_disposed || !_hasActiveGame) {
+      return;
+    }
+
+    if (_evaluateCheckTimers()) {
+      notifyListeners();
       return;
     }
 
@@ -482,9 +569,67 @@ class ChessAiGameController extends ChangeNotifier {
     if (_aiThinking ||
         cooldownRemaining('w').inMilliseconds > 0 ||
         cooldownRemaining('b').inMilliseconds > 0 ||
-        hasQueuedMove) {
+        hasQueuedMove ||
+        isCheckCountdownActive) {
       notifyListeners();
     }
+  }
+
+  /// Starts, refreshes, and enforces per-color check-escape deadlines.
+  ///
+  /// A side that is in check gets a deadline (now + [_checkTimeoutDuration])
+  /// the first tick it is seen in check; escaping check clears it. If the
+  /// deadline passes while still in check, that side loses. Returns true when a
+  /// loss was just triggered this call.
+  bool _evaluateCheckTimers() {
+    if (!_hasActiveGame || isGameOver) {
+      return false;
+    }
+    if (_checkTimeoutDuration.inMilliseconds <= 0) {
+      _whiteCheckDeadlineMs = null;
+      _blackCheckDeadlineMs = null;
+      return false;
+    }
+
+    final nowMs = _now().millisecondsSinceEpoch;
+    for (final color in const <String>['w', 'b']) {
+      final inCheck = ChessRules.isInCheckFor(_game, color);
+      if (!inCheck) {
+        _setDeadlineForColor(color, null);
+        continue;
+      }
+      final deadline = _deadlineForColor(color);
+      if (deadline == null) {
+        _setDeadlineForColor(
+          color,
+          nowMs + _checkTimeoutDuration.inMilliseconds,
+        );
+        _sessionLogger.logEvent(
+          'check_timer_started',
+          data: <String, Object?>{
+            ..._sessionSnapshot(),
+            'checkedColor': color,
+            'checkTimeoutSeconds': _checkTimeoutDuration.inSeconds,
+          },
+        );
+      } else if (nowMs >= deadline) {
+        _checkTimeoutLoserColor = color;
+        _cancelAiMoveTimer();
+        _clearSelection();
+        _clearQueuedMove();
+        _feedback = null;
+        _sessionLogger.logEvent(
+          'check_timer_expired',
+          data: <String, Object?>{
+            ..._sessionSnapshot(),
+            'checkedColor': color,
+            'winnerColor': ChessRules.oppositeColor(color),
+          },
+        );
+        return true;
+      }
+    }
+    return false;
   }
 
   bool _tryExecuteQueuedMoveIfReady() {
@@ -637,6 +782,10 @@ class ChessAiGameController extends ChangeNotifier {
       'cooldownSeconds': _cooldownDuration.inSeconds,
       'whiteRemainingMs': cooldownRemaining('w').inMilliseconds,
       'blackRemainingMs': cooldownRemaining('b').inMilliseconds,
+      'checkTimeoutSeconds': _checkTimeoutDuration.inSeconds,
+      'whiteCheckDeadlineMs': _whiteCheckDeadlineMs,
+      'blackCheckDeadlineMs': _blackCheckDeadlineMs,
+      'checkTimeoutLoser': _checkTimeoutLoserColor,
       'feedback': _feedback,
     };
   }
