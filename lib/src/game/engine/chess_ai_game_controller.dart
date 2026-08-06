@@ -58,6 +58,8 @@ class ChessAiGameController extends ChangeNotifier {
   int? _blackCheckDeadlineMs;
   // Set to the color that ran out of check time (a game-ending loss).
   String? _checkTimeoutLoserColor;
+  // Set to the color that conceded/resigned (a game-ending loss).
+  String? _concededColor;
   String _playerColor = 'w';
   String? _selectedSquare;
   Set<String> _legalTargets = <String>{};
@@ -77,11 +79,18 @@ class ChessAiGameController extends ChangeNotifier {
   bool get hasCheckTimeout => _checkTimeoutDuration.inMilliseconds > 0;
   bool get isCheckTimeoutLoss => _checkTimeoutLoserColor != null;
   String? get checkTimeoutLoserColor => _checkTimeoutLoserColor;
+  bool get isConcedeLoss => _concededColor != null;
   bool get hasActiveGame => _hasActiveGame;
-  bool get isGameOver => _game.game_over || _checkTimeoutLoserColor != null;
+  bool get isGameOver =>
+      _game.game_over ||
+      _checkTimeoutLoserColor != null ||
+      _concededColor != null;
   bool get isCheckmate => _game.in_checkmate;
   bool get isDraw => _game.in_draw;
   String? get winnerLabel {
+    if (_concededColor != null) {
+      return _concededColor == 'w' ? 'Black' : 'White';
+    }
     if (_checkTimeoutLoserColor != null) {
       return _checkTimeoutLoserColor == 'w' ? 'Black' : 'White';
     }
@@ -165,6 +174,10 @@ class ChessAiGameController extends ChangeNotifier {
       return 'Start a new game to begin.';
     }
     if (isGameOver) {
+      if (_concededColor != null) {
+        final winner = _concededColor == 'w' ? 'Black' : 'White';
+        return 'You conceded. $winner wins.';
+      }
       if (_checkTimeoutLoserColor != null) {
         final loser = _checkTimeoutLoserColor == 'w' ? 'White' : 'Black';
         final winner = _checkTimeoutLoserColor == 'w' ? 'Black' : 'White';
@@ -268,6 +281,7 @@ class ChessAiGameController extends ChangeNotifier {
     _whiteCheckDeadlineMs = null;
     _blackCheckDeadlineMs = null;
     _checkTimeoutLoserColor = null;
+    _concededColor = null;
     _cooldowns.resetReadyNow();
     _clearSelection();
     _scheduleAiMoveIfNeeded();
@@ -283,6 +297,19 @@ class ChessAiGameController extends ChangeNotifier {
       turnIndex: _derivedTurnIndex(),
       actionIndexOrPlyIndex: _derivedActionIndex(),
     );
+    notifyListeners();
+  }
+
+  /// Concede the game: the human player resigns and the AI wins.
+  void concede() {
+    if (!_hasActiveGame || isGameOver) {
+      return;
+    }
+    _concededColor = _playerColor;
+    _cancelAiMoveTimer();
+    _clearSelection();
+    _clearQueuedMove();
+    _feedback = null;
     notifyListeners();
   }
 

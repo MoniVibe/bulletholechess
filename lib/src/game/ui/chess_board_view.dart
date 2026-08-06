@@ -453,23 +453,34 @@ class _ChessBoardViewState extends State<ChessBoardView> {
     };
     final squares = <String>{...primary, ...secondary};
     for (final square in squares) {
-      Color color;
+      Color base;
       if (primary.contains(square) && secondary.contains(square)) {
-        color = Color.lerp(
+        base = Color.lerp(
           widget.lastMoveHighlightColor,
           widget.secondaryMoveHighlightColor,
           0.5,
-        )!.withValues(alpha: 0.35);
+        )!;
       } else if (primary.contains(square)) {
-        color = widget.lastMoveHighlightColor.withValues(alpha: 0.36);
+        base = widget.lastMoveHighlightColor;
       } else {
-        color = widget.secondaryMoveHighlightColor.withValues(alpha: 0.34);
+        base = widget.secondaryMoveHighlightColor;
       }
+      // Filled tint plus a bright ring so both the origin and the destination
+      // (where the moved piece now sits) read clearly.
       tiles.add(
         _tile(
           square,
           squareSize,
-          DecoratedBox(decoration: BoxDecoration(color: color)),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: base.withValues(alpha: 0.34),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(
+                color: base.withValues(alpha: 0.92),
+                width: 2.2,
+              ),
+            ),
+          ),
         ),
       );
     }

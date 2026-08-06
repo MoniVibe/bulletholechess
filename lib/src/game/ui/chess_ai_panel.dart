@@ -431,16 +431,30 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                     const SizedBox(height: 8),
                     SizedBox(
                       width: double.infinity,
-                      child: FilledButton.icon(
-                        key: const ValueKey<String>('chess_ai_new_game'),
-                        onPressed: _startNewGame,
-                        icon: const AppAssetIcon(
-                          AppAssets.newGameIcon,
-                          fallbackIcon: Icons.refresh,
-                          size: 18,
-                        ),
-                        label: const Text('New Game'),
-                      ),
+                      child:
+                          _controller.hasActiveGame && !_controller.isGameOver
+                          ? FilledButton.icon(
+                              key: const ValueKey<String>('chess_ai_concede'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Theme.of(
+                                  context,
+                                ).colorScheme.error,
+                                foregroundColor: Colors.white,
+                              ),
+                              onPressed: _confirmConcede,
+                              icon: const Icon(Icons.flag_rounded, size: 18),
+                              label: const Text('Concede'),
+                            )
+                          : FilledButton.icon(
+                              key: const ValueKey<String>('chess_ai_new_game'),
+                              onPressed: _startNewGame,
+                              icon: const AppAssetIcon(
+                                AppAssets.newGameIcon,
+                                fallbackIcon: Icons.refresh,
+                                size: 18,
+                              ),
+                              label: const Text('New Game'),
+                            ),
                     ),
                   ],
                 ),
@@ -818,6 +832,9 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
   }
 
   String _victorySubtitle() {
+    if (_controller.isConcedeLoss) {
+      return 'You conceded. ${_controller.winnerLabel ?? ''} takes the game.';
+    }
     if (_controller.isCheckTimeoutLoss) {
       final loser = _controller.checkTimeoutLoserColor == 'w'
           ? 'White'
@@ -833,6 +850,37 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
       return 'Checkmate. $winner takes the game.';
     }
     return _controller.statusText;
+  }
+
+  Future<void> _confirmConcede() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Concede game?'),
+          content: const Text(
+            'You forfeit this game and the AI wins. This cannot be undone.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(dialogContext).colorScheme.error,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Concede'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed == true) {
+      _controller.concede();
+    }
   }
 
   void _startNewGame() {
