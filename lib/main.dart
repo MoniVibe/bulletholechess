@@ -5,7 +5,12 @@ import 'src/game/engine/online_game_controller.dart';
 import 'src/game/ui/chess_game_screen.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const BulletholeChessApp());
+  // Additive, non-blocking: gather GDPR/UMP consent then initialise the ads SDK
+  // (mobile only; a no-op on web/desktop). Fire-and-forget and never throws into
+  // the app, so the game loop is unaffected.
+  AdsBootstrap.instance.initialize();
 }
 
 class BulletholeChessApp extends StatelessWidget {

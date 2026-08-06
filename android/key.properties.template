@@ -1,0 +1,21 @@
+# Release signing config for Bullethole Chess.
+#
+# HOW TO USE (director):
+#   1. Copy this file to `android/key.properties` (that name is gitignored —
+#      NEVER commit it or the keystore).
+#   2. Fill in the real values below.
+#   3. Place the keystore file somewhere outside version control and point
+#      `storeFile` at it (absolute path, or relative to android/app/).
+#
+# With key.properties present, `flutter build appbundle --release` signs with
+# these keys automatically. Without it, the release build falls back to the
+# debug keystore (fine for local testing, REJECTED by Google Play).
+#
+# Generate a keystore with:
+#   keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA \
+#           -keysize 2048 -validity 10000 -alias upload
+
+storePassword=CHANGME
+keyPassword=CHANGEME
+keyAlias=upload
+storeFile=/absolute/path/to/upload-keystore.jks
