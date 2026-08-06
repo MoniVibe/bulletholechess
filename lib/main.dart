@@ -25,7 +25,7 @@ class BulletholeChessApp extends StatelessWidget {
   Widget build(BuildContext context) {
     final baseTheme = buildBulletholeGameTheme(
       palette: const BulletholeThemePalette(
-        primary: Color(0xFFE04545),
+        primary: Color(0xFFEBA23C),
         secondary: Color(0xFFD39B46),
         tertiary: Color(0xFF4F79FF),
       ),

@@ -42,7 +42,7 @@ dependencies:
   bullethole_shared:
     git:
       url: https://github.com/MoniVibe/pureflutter.git
-      ref: 8bb1f4b
+      ref: 5a5d9b9
 
 dev_dependencies:
   flutter_test:

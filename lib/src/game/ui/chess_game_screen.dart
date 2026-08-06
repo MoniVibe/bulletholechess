@@ -2,7 +2,6 @@ import 'package:bullethole_shared/bullethole_shared.dart';
 import 'package:flutter/material.dart';
 
 import '../engine/online_game_controller.dart';
-import 'app_assets.dart';
 import 'chess_ai_panel.dart';
 import 'online_game_panel.dart';
 import 'ui_sfx.dart';
@@ -29,7 +28,7 @@ class _ChessGameScreenState extends State<ChessGameScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: GameBackdrop(
-        backgroundAssetPath: AppAssets.appBackground,
+        accentGlow: Theme.of(context).colorScheme.primary,
         child: SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) {
