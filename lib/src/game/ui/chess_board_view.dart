@@ -80,6 +80,7 @@ class ChessBoardView extends StatefulWidget {
 class _ChessBoardViewState extends State<ChessBoardView> {
   static const String _files = 'abcdefgh';
   static const Duration _moveDuration = Duration(milliseconds: 200);
+  static const Duration _captureFadeDuration = Duration(milliseconds: 200);
   static const Curve _moveCurve = Curves.easeOutCubic;
   static const double _pieceLiftPixels = 3.5;
   static const double _pieceHeightBoostPixels = 2.0;
@@ -93,6 +94,8 @@ class _ChessBoardViewState extends State<ChessBoardView> {
   );
 
   final List<_PieceSprite> _sprites = <_PieceSprite>[];
+  // Captured/removed sprites kept briefly so they can fade out in place.
+  final List<_PieceSprite> _departing = <_PieceSprite>[];
   int _nextSpriteId = 0;
   double _squareSize = 0;
 
@@ -110,8 +113,12 @@ class _ChessBoardViewState extends State<ChessBoardView> {
   void didUpdateWidget(covariant ChessBoardView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.playerColor != oldWidget.playerColor) {
-      // Re-orienting the board makes any in-flight drag ambiguous.
+      // Re-orienting the board would fling every piece across the screen and
+      // makes any in-flight drag ambiguous, so snap to the new layout instead.
       _cancelDrag();
+      _departing.clear();
+      _seedSprites();
+      return;
     }
     if (!mapEquals(oldWidget.pieces, widget.pieces)) {
       _reconcileSprites();
@@ -120,6 +127,7 @@ class _ChessBoardViewState extends State<ChessBoardView> {
 
   void _seedSprites() {
     _sprites.clear();
+    _departing.clear();
     widget.pieces.forEach((square, piece) {
       _sprites.add(
         _PieceSprite(id: _nextSpriteId++, square: square, piece: piece),
@@ -185,11 +193,17 @@ class _ChessBoardViewState extends State<ChessBoardView> {
       }
     }
 
-    setState(() {
-      _sprites
-        ..clear()
-        ..addAll(result);
-    });
+    // Departed sprites with no matching arrival were captured/removed: let them
+    // fade out in place rather than blink away.
+    for (final sprite in departed) {
+      if (!used.contains(sprite)) {
+        _departing.add(sprite);
+      }
+    }
+
+    _sprites
+      ..clear()
+      ..addAll(result);
   }
 
   double _squareDistance(String a, String b) {
@@ -275,6 +289,7 @@ class _ChessBoardViewState extends State<ChessBoardView> {
     children.addAll(_checkedKingTiles(squareSize));
     children.addAll(_targetTiles(squareSize));
     children.addAll(_queuedTiles(squareSize));
+    children.addAll(_departingWidgets(squareSize));
     children.addAll(_spriteWidgets(squareSize));
 
     children.add(
@@ -295,6 +310,48 @@ class _ChessBoardViewState extends State<ChessBoardView> {
       height: squareSize * 8,
       child: Stack(clipBehavior: Clip.none, children: children),
     );
+  }
+
+  List<Widget> _departingWidgets(double squareSize) {
+    final widgets = <Widget>[];
+    for (final sprite in _departing) {
+      final rect = _rectForSquare(sprite.square, squareSize);
+      widgets.add(
+        Positioned(
+          key: ValueKey<String>('depart_${sprite.id}'),
+          left: rect.left,
+          top: rect.top,
+          width: squareSize,
+          height: squareSize,
+          child: IgnorePointer(
+            child: TweenAnimationBuilder<double>(
+              tween: Tween<double>(begin: 1, end: 0),
+              duration: _captureFadeDuration,
+              curve: Curves.easeIn,
+              onEnd: () {
+                if (!mounted) {
+                  return;
+                }
+                setState(() {
+                  _departing.removeWhere((s) => s.id == sprite.id);
+                });
+              },
+              builder: (context, value, child) {
+                return Opacity(
+                  opacity: value.clamp(0.0, 1.0),
+                  child: Transform.scale(
+                    scale: 0.55 + 0.45 * value,
+                    child: child,
+                  ),
+                );
+              },
+              child: _spriteVisual(sprite, squareSize),
+            ),
+          ),
+        ),
+      );
+    }
+    return widgets;
   }
 
   List<Widget> _spriteWidgets(double squareSize) {
