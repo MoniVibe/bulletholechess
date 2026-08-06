@@ -163,7 +163,7 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
             : const Color(0xFFFFCCBC);
 
         return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
           child: Column(
             children: [
               CollapsibleSettingsCard(
@@ -436,9 +436,9 @@ class _ChessAiPanelState extends State<ChessAiPanel> {
                 child: Center(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      const baseHorizontalBarHeight = 58.0;
-                      const baseVerticalBarWidth = 64.0;
-                      const boardGap = 10.0;
+                      const baseHorizontalBarHeight = 50.0;
+                      const baseVerticalBarWidth = 58.0;
+                      const boardGap = 8.0;
                       final horizontalBarHeight = hasActiveGame
                           ? baseHorizontalBarHeight
                           : 0.0;

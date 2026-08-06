@@ -402,7 +402,7 @@ class _ChessBoardViewState extends State<ChessBoardView> {
     final piece = sprite.piece;
     final isWhite = piece == piece.toUpperCase();
     final scale = (isWhite ? widget.whitePieceScale : widget.blackPieceScale)
-        .clamp(0.5, 1.5);
+        .clamp(0.5, 1.7);
     final yOffset =
         (isWhite ? widget.whitePieceYOffset : widget.blackPieceYOffset).clamp(
           -0.4,
