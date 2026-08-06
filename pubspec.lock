@@ -36,9 +36,11 @@ packages:
   bullethole_shared:
     dependency: "direct main"
     description:
-      path: "../pureflutter"
-      relative: true
-    source: path
+      path: "."
+      ref: "8bb1f4b"
+      resolved-ref: "8bb1f4b39266a463b2c6532deb2af8862e8b2f29"
+      url: "https://github.com/MoniVibe/pureflutter.git"
+    source: git
     version: "0.1.0"
   characters:
     dependency: transitive

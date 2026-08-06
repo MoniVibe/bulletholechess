@@ -42,17 +42,7 @@ dependencies:
   bullethole_shared:
     git:
       url: https://github.com/MoniVibe/pureflutter.git
-      ref: f3ef45a
-
-# TEMPORARY build-before-push seam. The release/monetization kit lives in the
-# bullethole_shared source (github.com/MoniVibe/pureflutter). Because the git dep
-# above is pinned to ref f3ef45a (which predates the kit) and the kit commit is
-# not yet pushed, we resolve bullethole_shared from the local sibling checkout so
-# the kit is visible and the app builds. WHEN pureflutter is pushed: bump the git
-# `ref` above to the kit commit and DELETE this dependency_overrides block.
-dependency_overrides:
-  bullethole_shared:
-    path: ../pureflutter
+      ref: 8bb1f4b
 
 dev_dependencies:
   flutter_test:
