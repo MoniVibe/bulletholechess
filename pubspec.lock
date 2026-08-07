@@ -37,8 +37,8 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: a68cdda
-      resolved-ref: a68cdda924e57ec9ded7aa680dd798c984c7e4ba
+      ref: "4e5f6a2"
+      resolved-ref: "4e5f6a2eb7cf916d18f4de28486cc62469eb9ffd"
       url: "https://github.com/MoniVibe/pureflutter.git"
     source: git
     version: "0.1.0"

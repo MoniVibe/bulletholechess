@@ -25,9 +25,12 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <!-- AdMob application ID. TEST value from Google (safe, never bans an
-             account). Replace with the director's real ID when it arrives and
-             keep it in sync with AdConfig.appId in bullethole_shared. -->
+        <!-- AdMob application ID. Active value is Google's TEST id (safe, never
+             bans an account) so default/test builds work out of the box. At
+             go-live, replace it with Bullethole Chess's real App ID:
+             ca-app-pub-4992063355616359~1799160184
+             (must match AdConfig.appId, which is set via AdConfig.configure in
+             main.dart). -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
             android:value="ca-app-pub-3940256099942544~3347511713" />

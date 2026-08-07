@@ -7,6 +7,14 @@ import 'src/game/ui/chess_game_screen.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const BulletholeChessApp());
+  // Bullethole Chess's own AdMob production ids (it is its own AdMob app). Only
+  // used when built with --dart-define=bullethole.ads.prod=true; default/test
+  // builds ignore them. The App ID must match AndroidManifest APPLICATION_ID at
+  // go-live.
+  AdConfig.configure(
+    androidAppId: 'ca-app-pub-4992063355616359~1799160184',
+    androidInterstitial: 'ca-app-pub-4992063355616359/6915755495',
+  );
   // Additive, non-blocking: gather GDPR/UMP consent then initialise the ads SDK
   // (mobile only; a no-op on web/desktop). Fire-and-forget and never throws into
   // the app, so the game loop is unaffected.
